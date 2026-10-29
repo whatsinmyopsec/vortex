@@ -237,9 +237,11 @@ export default {
 
       try {
         const resolved = await resolveSongTarget(target);
-        const proxiedUrl = `${url.origin}/api/proxy-audio?url=${encodeURIComponent(
-          resolved.streamUrl
-        )}`;
+        const proxiedUrl = resolved.streamUrl.includes('somafm.com')
+          ? resolved.streamUrl
+          : `${url.origin}/api/proxy-audio?url=${encodeURIComponent(
+              resolved.streamUrl
+            )}`;
         return new Response(
           JSON.stringify({
             ok: true,
@@ -286,12 +288,12 @@ export default {
 
       const upstreamHeaders = new Headers();
       const range = request.headers.get('Range');
-      if (range) {
+      if (range && !target.includes('somafm.com')) {
         upstreamHeaders.set('Range', range);
       }
       upstreamHeaders.set(
         'User-Agent',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
       );
 
       const upstreamRes = await fetch(target, {

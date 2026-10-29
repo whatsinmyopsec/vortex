@@ -542,8 +542,23 @@ async function resolveExternalSongUrl(rawInput: string): Promise<{
 async function startServer() {
   const app = express();
 
+  app.options('/api/*', (_req: Request, res: Response) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, HEAD, OPTIONS');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Range, Content-Type, Accept, Origin'
+    );
+    res.setHeader(
+      'Access-Control-Expose-Headers',
+      'Content-Length, Content-Range, Accept-Ranges, Content-Type'
+    );
+    res.status(204).end();
+  });
+
   // 1. Resolve song sharing links (Suno shortlinks, Suno song links, Dropbox, etc.)
   app.get('/api/resolve-song', async (req: Request, res: Response) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
     const rawUrl = typeof req.query.url === 'string' ? req.query.url : '';
     if (!rawUrl.trim()) {
       res.status(400).json({ ok: false, error: 'Missing url parameter' });
@@ -561,8 +576,10 @@ async function startServer() {
       return;
     }
 
-    const isLocalAsset = result.streamUrl.startsWith('/');
-    const proxiedUrl = isLocalAsset
+    const isDirectStream =
+      result.streamUrl.startsWith('/') ||
+      result.streamUrl.includes('somafm.com');
+    const proxiedUrl = isDirectStream
       ? result.streamUrl
       : `/api/proxy-audio?url=${encodeURIComponent(result.streamUrl)}`;
 
@@ -636,9 +653,12 @@ async function startServer() {
 
       const upstreamHeaders: Record<string, string> = {
         'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
       };
-      if (typeof req.headers.range === 'string') {
+      if (
+        typeof req.headers.range === 'string' &&
+        !targetUrl.includes('somafm.com')
+      ) {
         upstreamHeaders['Range'] = req.headers.range;
       }
 
@@ -662,8 +682,11 @@ async function startServer() {
 
       res.status(upstream.status);
       res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader(
+        'Access-Control-Expose-Headers',
+        'Content-Length, Content-Range, Accept-Ranges, Content-Type'
+      );
       res.setHeader('Content-Type', contentType);
-      res.setHeader('Accept-Ranges', 'bytes');
 
       const contentLength = upstream.headers.get('content-length');
       if (contentLength) {
@@ -673,10 +696,17 @@ async function startServer() {
       if (contentRange) {
         res.setHeader('Content-Range', contentRange);
       }
+      if (contentLength || contentRange) {
+        res.setHeader('Accept-Ranges', 'bytes');
+      } else {
+        res.setHeader('Cache-Control', 'no-cache, no-store');
+      }
       const cacheControl = upstream.headers.get('cache-control');
-      if (cacheControl) {
+      if (cacheControl && (contentLength || contentRange)) {
         res.setHeader('Cache-Control', cacheControl);
       }
+
+      res.flushHeaders();
 
       if (!upstream.body) {
         res.end();

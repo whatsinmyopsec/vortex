@@ -1544,14 +1544,55 @@ export class ProceduralAudioEngine {
       if (this.params.audioSource === 'procedural' || !this.currentRefTrackUrl) {
         return;
       }
+
+      // Step 1a: If a direct ice1.somafm.com live stream hiccups, try SomaFM's ice2 mirror on refAudioEl (keeping Web Audio FFT active)
+      if (
+        this.refAudioEl &&
+        this.currentRefTrackUrl.includes('ice1.somafm.com')
+      ) {
+        const mirrorUrl = this.currentRefTrackUrl.replace(
+          'ice1.somafm.com',
+          'ice2.somafm.com'
+        );
+        this.currentRefTrackUrl = mirrorUrl;
+        this.refAudioEl.src = mirrorUrl;
+        this.refAudioEl.load();
+        if (this.isRunning) {
+          void this.refAudioEl.play().catch(() => {});
+        }
+        return;
+      }
+
+      // Step 1b: If ice2.somafm.com also fails and we have a local/worker proxy, try proxying the stream on refAudioEl
+      if (
+        this.refAudioEl &&
+        this.currentRefTrackUrl.includes('ice2.somafm.com') &&
+        !this.currentRefTrackUrl.includes('/api/proxy-audio') &&
+        !isStaticHostWithoutWorker()
+      ) {
+        const originalSoma = this.currentRefTrackUrl.replace(
+          'ice2.somafm.com',
+          'ice1.somafm.com'
+        );
+        const proxiedSoma = `${AUDIO_API_BASE}/api/proxy-audio?url=${encodeURIComponent(originalSoma)}`;
+        this.currentRefTrackUrl = proxiedSoma;
+        this.refAudioEl.src = proxiedSoma;
+        this.refAudioEl.load();
+        if (this.isRunning) {
+          void this.refAudioEl.play().catch(() => {});
+        }
+        return;
+      }
+
       const unwrappedUrl = unwrapDirectFallbackUrl(this.currentRefTrackUrl);
-      // Step 1: If refAudioEl was using a proxy URL, retry the unwrapped CDN URL (e.g. cdn1.suno.ai) directly on refAudioEl
+      // Step 1c: If refAudioEl was using a proxy URL, retry the unwrapped CDN URL (e.g. cdn1.suno.ai) directly on refAudioEl
       // so Web Audio AnalyserNode FFT and MediaStream video recording remain active
       if (
         this.refAudioEl &&
         unwrappedUrl &&
         unwrappedUrl !== this.currentRefTrackUrl &&
-        !this.refAudioEl.src.includes('cdn1.suno.ai')
+        !this.refAudioEl.src.includes('cdn1.suno.ai') &&
+        !unwrappedUrl.includes('somafm.com')
       ) {
         this.currentRefTrackUrl = unwrappedUrl;
         this.refAudioEl.src = unwrappedUrl;
