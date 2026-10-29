@@ -56,6 +56,7 @@ interface AudioSynthPanelProps {
   onAudioStateChange?: (isActive: boolean, musicDrivesTime: boolean) => void;
   externalToggleAudioRef?: React.MutableRefObject<(() => Promise<void>) | null>;
   externalToggleMusicDriveRef?: React.MutableRefObject<(() => Promise<void>) | null>;
+  externalGetAudioStreamRef?: React.MutableRefObject<(() => MediaStream | null) | null>;
 }
 
 type SynthTab = 'drums' | 'voices' | 'architecture';
@@ -71,6 +72,7 @@ export const AudioSynthPanel: React.FC<AudioSynthPanelProps> = ({
   onAudioStateChange,
   externalToggleAudioRef,
   externalToggleMusicDriveRef,
+  externalGetAudioStreamRef,
 }) => {
   const [params, setParams] = useState<SynthParams>(DEFAULT_SYNTH_PARAMS);
   const [isAudioActive, setIsAudioActive] = useState<boolean>(false);
@@ -321,6 +323,10 @@ export const AudioSynthPanel: React.FC<AudioSynthPanelProps> = ({
     }
     if (externalToggleMusicDriveRef) {
       externalToggleMusicDriveRef.current = handleToggleMusicDrivesTime;
+    }
+    if (externalGetAudioStreamRef) {
+      externalGetAudioStreamRef.current = () =>
+        engineRef.current?.getCaptureAudioStream() ?? null;
     }
   });
 

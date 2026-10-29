@@ -16,6 +16,7 @@ import {
   Download,
   Eye,
   EyeOff,
+  Film,
   Layers,
   Lock,
   Maximize2,
@@ -25,6 +26,8 @@ import {
   Play,
   RotateCcw,
   Sparkles,
+  Square,
+  Video,
   Volume2,
   VolumeX,
   Zap,
@@ -53,8 +56,21 @@ import {
   ShaderLayerDefinition,
   ShaderState,
 } from './shaders/types';
+import {
+  createAndStartVideoRecorder,
+  encodeAnimatedGif,
+  finalizeRecordedVideoBlob,
+  getPreferredVideoMimeType,
+  quantizeFrameToIndexed,
+} from './utils/mediaExporter';
 
 type HudSection = 'layers' | 'distortion' | 'presets' | 'glsl';
+type CaptureMode =
+  | 'idle'
+  | 'recording-gif'
+  | 'encoding-gif'
+  | 'recording-video'
+  | 'encoding-video';
 
 export default function App() {
   const [state, setState] = useState<ShaderState>(DEFAULT_SHADER_STATE);
@@ -90,6 +106,13 @@ export default function App() {
   const audioBandsRef = useRef<AudioBandLevels>({ ...DEFAULT_AUDIO_BAND_LEVELS });
   const toggleAudioRef = useRef<(() => Promise<void>) | null>(null);
   const toggleMusicDriveRef = useRef<(() => Promise<void>) | null>(null);
+  const getAudioStreamRef = useRef<(() => MediaStream | null) | null>(null);
+
+  const [captureMode, setCaptureMode] = useState<CaptureMode>('idle');
+  const [captureSecondsLeft, setCaptureSecondsLeft] = useState<number>(15);
+  const [gifEncodeProgress, setGifEncodeProgress] = useState<number>(0);
+  const stopActiveCaptureRef = useRef<(() => void) | null>(null);
+  const preferredVideoFormat = useMemo(() => getPreferredVideoMimeType(), []);
 
   const handleAudioStateChange = useCallback(
     (active: boolean, drivesTime: boolean) => {
@@ -465,6 +488,205 @@ export default function App() {
     link.click();
   };
 
+  const handleExport15sGif = useCallback(() => {
+    if (captureMode === 'recording-gif') {
+      stopActiveCaptureRef.current?.();
+      return;
+    }
+    if (captureMode !== 'idle') return;
+
+    const sourceCanvas = canvasRef.current;
+    if (!sourceCanvas) return;
+
+    const DURATION_SEC = 15;
+    const GIF_FPS = 12;
+    const MAX_DIM = 480;
+
+    const srcW = Math.max(1, sourceCanvas.width);
+    const srcH = Math.max(1, sourceCanvas.height);
+    const scale = Math.min(1, MAX_DIM / Math.max(srcW, srcH));
+    const gifW = Math.max(2, Math.round((srcW * scale) / 2) * 2);
+    const gifH = Math.max(2, Math.round((srcH * scale) / 2) * 2);
+
+    const scratchCanvas = document.createElement('canvas');
+    scratchCanvas.width = gifW;
+    scratchCanvas.height = gifH;
+    const scratchCtx = scratchCanvas.getContext('2d', {
+      willReadFrequently: true,
+    });
+    if (!scratchCtx) return;
+
+    const indexedFrames: Uint8Array[] = [];
+    const startTime = performance.now();
+    let finished = false;
+
+    setCaptureMode('recording-gif');
+    setCaptureSecondsLeft(DURATION_SEC);
+    setGifEncodeProgress(0);
+
+    const captureFrame = () => {
+      if (finished || !canvasRef.current) return;
+      scratchCtx.drawImage(canvasRef.current, 0, 0, gifW, gifH);
+      const imgData = scratchCtx.getImageData(0, 0, gifW, gifH);
+      indexedFrames.push(quantizeFrameToIndexed(imgData.data, gifW, gifH));
+    };
+
+    // Capture initial frame immediately
+    captureFrame();
+
+    const frameInterval = window.setInterval(captureFrame, 1000 / GIF_FPS);
+    const countdownInterval = window.setInterval(() => {
+      const elapsed = (performance.now() - startTime) / 1000;
+      const remaining = Math.max(0, Math.ceil(DURATION_SEC - elapsed));
+      setCaptureSecondsLeft(remaining);
+    }, 200);
+
+    const finishGifRecording = async () => {
+      if (finished) return;
+      finished = true;
+      window.clearInterval(frameInterval);
+      window.clearInterval(countdownInterval);
+      window.clearTimeout(autoStopTimeout);
+      stopActiveCaptureRef.current = null;
+
+      if (indexedFrames.length === 0) {
+        setCaptureMode('idle');
+        return;
+      }
+
+      setCaptureMode('encoding-gif');
+      setGifEncodeProgress(0);
+
+      try {
+        const blob = await encodeAnimatedGif(
+          indexedFrames,
+          gifW,
+          gifH,
+          GIF_FPS,
+          (progress) => setGifEncodeProgress(Math.round(progress * 100))
+        );
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.download = `vortex-shader-15s-${Date.now()}.gif`;
+        link.href = url;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 10000);
+      } finally {
+        setCaptureMode('idle');
+      }
+    };
+
+    const autoStopTimeout = window.setTimeout(
+      () => void finishGifRecording(),
+      DURATION_SEC * 1000
+    );
+
+    stopActiveCaptureRef.current = () => {
+      void finishGifRecording();
+    };
+  }, [captureMode]);
+
+  const handleExport15sVideo = useCallback(async () => {
+    if (captureMode === 'recording-video') {
+      stopActiveCaptureRef.current?.();
+      return;
+    }
+    if (captureMode !== 'idle') return;
+
+    const sourceCanvas = canvasRef.current;
+    if (!sourceCanvas || typeof MediaRecorder === 'undefined') return;
+
+    // Ensure the live audio engine is running so the recorded video includes music
+    if (!isAudioPlaying && toggleAudioRef.current) {
+      await toggleAudioRef.current();
+    }
+
+    const DURATION_SEC = 15;
+    const canvasStream = sourceCanvas.captureStream(60);
+    const videoTracks = canvasStream.getVideoTracks();
+    const liveAudioStream = getAudioStreamRef.current?.();
+    const audioTracks = liveAudioStream ? liveAudioStream.getAudioTracks() : [];
+
+    const { extension } = preferredVideoFormat;
+    const chunks: BlobPart[] = [];
+    const startTime = performance.now();
+    let stopped = false;
+    let countdownInterval = 0;
+    let autoStopTimeout = 0;
+
+    const recorder = createAndStartVideoRecorder(
+      videoTracks,
+      audioTracks,
+      250,
+      (e) => {
+        if (e.data && e.data.size > 0) {
+          chunks.push(e.data);
+        }
+      },
+      async (actualMimeType) => {
+        window.clearInterval(countdownInterval);
+        window.clearTimeout(autoStopTimeout);
+        stopActiveCaptureRef.current = null;
+        for (const track of videoTracks) {
+          track.stop();
+        }
+
+        if (chunks.length > 0) {
+          setCaptureMode('encoding-video');
+          try {
+            const rawBlob = new Blob(chunks, {
+              type: actualMimeType || 'video/mp4',
+            });
+            const finalized = await finalizeRecordedVideoBlob(
+              rawBlob,
+              extension
+            );
+            const url = URL.createObjectURL(finalized.blob);
+            const link = document.createElement('a');
+            link.download = `vortex-shader-15s-${Date.now()}.${finalized.extension}`;
+            link.href = url;
+            link.click();
+            window.setTimeout(() => URL.revokeObjectURL(url), 10000);
+          } finally {
+            setCaptureMode('idle');
+          }
+        } else {
+          setCaptureMode('idle');
+        }
+      }
+    );
+
+    if (!recorder) {
+      for (const track of videoTracks) {
+        track.stop();
+      }
+      setCaptureMode('idle');
+      return;
+    }
+
+    setCaptureMode('recording-video');
+    setCaptureSecondsLeft(DURATION_SEC);
+
+    countdownInterval = window.setInterval(() => {
+      const elapsed = (performance.now() - startTime) / 1000;
+      const remaining = Math.max(0, Math.ceil(DURATION_SEC - elapsed));
+      setCaptureSecondsLeft(remaining);
+    }, 200);
+
+    const stopVideoRecording = () => {
+      if (stopped) return;
+      stopped = true;
+      recorder.stop();
+    };
+
+    autoStopTimeout = window.setTimeout(
+      stopVideoRecording,
+      DURATION_SEC * 1000
+    );
+
+    stopActiveCaptureRef.current = stopVideoRecording;
+  }, [captureMode, isAudioPlaying, preferredVideoFormat]);
+
   const liveGlslCode = useMemo(() => generateShadertoyCode(state, SHADER_LAYERS), [state]);
 
   const handleCopyGlsl = async () => {
@@ -582,12 +804,92 @@ export default function App() {
           </button>
         </nav>
 
-        {/* Zone 3: 1 primary action */}
-        <div className="flex items-center shrink-0">
+        {/* Zone 3: Export Actions (15s GIF, 15s Video, Export PNG) */}
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={handleExport15sGif}
+            disabled={
+              captureMode === 'recording-video' ||
+              captureMode === 'encoding-video' ||
+              captureMode === 'encoding-gif'
+            }
+            title={
+              captureMode === 'recording-gif'
+                ? 'Click to stop early and save GIF'
+                : 'Record a 15-second looping animated GIF of the shader'
+            }
+            className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              captureMode === 'recording-gif'
+                ? 'bg-rose-500/25 border-rose-400/60 text-rose-200 hover:bg-rose-500/35'
+                : captureMode === 'encoding-gif'
+                  ? 'bg-amber-500/20 border-amber-400/40 text-amber-200 cursor-wait'
+                  : 'bg-white/10 border-white/15 text-white hover:bg-white/15 disabled:opacity-40 disabled:cursor-not-allowed'
+            }`}
+          >
+            {captureMode === 'recording-gif' ? (
+              <>
+                <Square className="w-3 h-3 fill-rose-400 text-rose-400 animate-pulse" />
+                <span>Stop GIF ({captureSecondsLeft}s)</span>
+              </>
+            ) : captureMode === 'encoding-gif' ? (
+              <>
+                <Film className="w-3.5 h-3.5 text-amber-400 animate-spin" />
+                <span>Encoding {gifEncodeProgress}%</span>
+              </>
+            ) : (
+              <>
+                <Film className="w-3.5 h-3.5 text-amber-400" />
+                <span>15s GIF</span>
+              </>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void handleExport15sVideo()}
+            disabled={
+              captureMode === 'recording-gif' ||
+              captureMode === 'encoding-gif' ||
+              captureMode === 'encoding-video'
+            }
+            title={
+              captureMode === 'recording-video'
+                ? 'Click to stop early and save video'
+                : `Record a 15-second 60 FPS ${preferredVideoFormat.label} video with stereo audio`
+            }
+            className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              captureMode === 'recording-video'
+                ? 'bg-rose-500/25 border-rose-400/60 text-rose-200 hover:bg-rose-500/35'
+                : captureMode === 'encoding-video'
+                  ? 'bg-amber-500/20 border-amber-400/40 text-amber-200 cursor-wait'
+                  : 'bg-white/10 border-white/15 text-white hover:bg-white/15 disabled:opacity-40 disabled:cursor-not-allowed'
+            }`}
+          >
+            {captureMode === 'recording-video' ? (
+              <>
+                <Square className="w-3 h-3 fill-rose-400 text-rose-400 animate-pulse" />
+                <span>
+                  Stop {preferredVideoFormat.label} ({captureSecondsLeft}s)
+                </span>
+              </>
+            ) : captureMode === 'encoding-video' ? (
+              <>
+                <Video className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                <span>Muxing Audio...</span>
+              </>
+            ) : (
+              <>
+                <Video className="w-3.5 h-3.5 text-amber-400" />
+                <span>15s {preferredVideoFormat.label}</span>
+              </>
+            )}
+          </button>
+
           <button
             type="button"
             onClick={handleExportPng}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-neutral-950 bg-amber-400 rounded-lg hover:bg-amber-300 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-neutral-950 bg-amber-400 rounded-lg hover:bg-amber-300 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
             Export PNG
@@ -607,6 +909,7 @@ export default function App() {
         onAudioStateChange={handleAudioStateChange}
         externalToggleAudioRef={toggleAudioRef}
         externalToggleMusicDriveRef={toggleMusicDriveRef}
+        externalGetAudioStreamRef={getAudioStreamRef}
       />
 
       {/* Right Floating Panel: Modular Shader Compositor & Distortion Controls */}

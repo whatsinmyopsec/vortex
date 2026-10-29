@@ -1,6 +1,8 @@
 import express, { Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
 import { spawn } from 'child_process';
+import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 const PORT = 3000;
@@ -710,6 +712,109 @@ async function startServer() {
       }
     }
   });
+
+  // 3. Remux/transcode browser MediaRecorder video into universal H.264 + AAC MP4 so audio plays in all media players
+  app.post(
+    '/api/remux-mp4',
+    express.raw({ type: '*/*', limit: '80mb' }),
+    async (req: Request, res: Response) => {
+      const inputBuf = req.body as Buffer;
+      if (!Buffer.isBuffer(inputBuf) || inputBuf.length === 0) {
+        res.status(400).send('Empty video payload');
+        return;
+      }
+
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const inPath = path.join(os.tmpdir(), `vortex-in-${id}.bin`);
+      const outPath = path.join(os.tmpdir(), `vortex-out-${id}.mp4`);
+
+      const cleanup = () => {
+        try {
+          if (fs.existsSync(inPath)) fs.unlinkSync(inPath);
+        } catch {}
+        try {
+          if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
+        } catch {}
+      };
+
+      const runFfmpeg = (args: string[]): Promise<void> =>
+        new Promise((resolve, reject) => {
+          const ff = spawn('ffmpeg', args);
+          ff.on('error', reject);
+          ff.on('close', (code) => {
+            if (code === 0) resolve();
+            else reject(new Error(`ffmpeg exited with code ${code}`));
+          });
+        });
+
+      try {
+        await fs.promises.writeFile(inPath, inputBuf);
+
+        // Fast path (~80ms): if browser recorded H.264 video in MP4/MKV, copy video stream directly and encode audio to AAC
+        try {
+          await runFfmpeg([
+            '-y',
+            '-hide_banner',
+            '-loglevel',
+            'error',
+            '-i',
+            inPath,
+            '-c:v',
+            'copy',
+            '-c:a',
+            'aac',
+            '-b:a',
+            '192k',
+            '-ac',
+            '2',
+            '-movflags',
+            '+faststart',
+            outPath,
+          ]);
+        } catch {
+          // Fallback if input video codec is VP8/VP9 (WebM): fast transcode to H.264 + AAC
+          await runFfmpeg([
+            '-y',
+            '-hide_banner',
+            '-loglevel',
+            'error',
+            '-i',
+            inPath,
+            '-vf',
+            "scale='min(1280,trunc(iw/2)*2)':trunc(ow/dar/2)*2",
+            '-c:v',
+            'libx264',
+            '-preset',
+            'ultrafast',
+            '-crf',
+            '20',
+            '-pix_fmt',
+            'yuv420p',
+            '-c:a',
+            'aac',
+            '-b:a',
+            '192k',
+            '-ac',
+            '2',
+            '-movflags',
+            '+faststart',
+            outPath,
+          ]);
+        }
+
+        const mp4Buf = await fs.promises.readFile(outPath);
+        res.setHeader('Content-Type', 'video/mp4');
+        res.setHeader('Content-Length', String(mp4Buf.length));
+        res.send(mp4Buf);
+      } catch {
+        // Fallback: return original buffer if ffmpeg unavailable
+        res.setHeader('Content-Type', 'video/mp4');
+        res.send(inputBuf);
+      } finally {
+        cleanup();
+      }
+    }
+  );
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

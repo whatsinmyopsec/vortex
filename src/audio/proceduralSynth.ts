@@ -219,9 +219,9 @@ export function resolveSongUrl(rawInput: string): {
     const shareCode = sunoShortMatch[1];
     const known = KNOWN_SUNO_SHORTLINKS[shareCode];
     if (known) {
-      const m4aUrl = `https://d2lwuy8qc234o3.cloudfront.net/1/clip/${known.uuid}.m4a`;
+      const mp4Url = `https://cdn1.suno.ai/${known.uuid}.mp4`;
       return {
-        url: wrapWithAudioProxy(m4aUrl),
+        url: wrapWithAudioProxy(mp4Url),
         title: known.title,
       };
     }
@@ -238,9 +238,9 @@ export function resolveSongUrl(rawInput: string): {
   );
   if (sunoMatch) {
     const uuid = sunoMatch[1];
-    const m4aUrl = `https://d2lwuy8qc234o3.cloudfront.net/1/clip/${uuid}.m4a`;
+    const mp4Url = `https://cdn1.suno.ai/${uuid}.mp4`;
     return {
-      url: wrapWithAudioProxy(m4aUrl),
+      url: wrapWithAudioProxy(mp4Url),
       title: `Suno Track (${uuid.slice(0, 8)})`,
       needsServerResolve: true,
     };
@@ -1028,6 +1028,7 @@ export class ProceduralAudioEngine {
   private masterGain: GainNode | null = null;
   private proceduralMasterBus: GainNode | null = null;
   private analyser: AnalyserNode | null = null;
+  private mediaStreamDest: MediaStreamAudioDestinationNode | null = null;
   private freqBins: Uint8Array<ArrayBuffer> = new Uint8Array(256);
   private isRunning = false;
   private params: SynthParams = DEFAULT_SYNTH_PARAMS;
@@ -1291,6 +1292,27 @@ export class ProceduralAudioEngine {
     return this.isRunning;
   }
 
+  public getCaptureAudioStream(): MediaStream | null {
+    this.unlockOnUserGesture();
+    if (
+      this.usingCorsFallback &&
+      this.corsFallbackAudioEl &&
+      !this.corsFallbackAudioEl.paused
+    ) {
+      const elWithCapture = this.corsFallbackAudioEl as HTMLAudioElement & {
+        captureStream?: () => MediaStream;
+        mozCaptureStream?: () => MediaStream;
+      };
+      const fallbackStream =
+        elWithCapture.captureStream?.() || elWithCapture.mozCaptureStream?.();
+      if (fallbackStream && fallbackStream.getAudioTracks().length > 0) {
+        return fallbackStream;
+      }
+    }
+    if (!this.mediaStreamDest) return null;
+    return this.mediaStreamDest.stream;
+  }
+
   public getTelemetry(): SynthLiveTelemetry {
     const activeEl = this.usingCorsFallback ? this.corsFallbackAudioEl : this.refAudioEl;
     if (activeEl && this.params.audioSource !== 'procedural') {
@@ -1520,7 +1542,25 @@ export class ProceduralAudioEngine {
       if (this.params.audioSource === 'procedural' || !this.currentRefTrackUrl) {
         return;
       }
-      // If external song link blocked CORS or /api/proxy-audio is 404 on static hosting, seamlessly retry in corsFallbackAudioEl
+      const unwrappedUrl = unwrapDirectFallbackUrl(this.currentRefTrackUrl);
+      // Step 1: If refAudioEl was using a proxy URL, retry the unwrapped CDN URL (e.g. cdn1.suno.ai) directly on refAudioEl
+      // so Web Audio AnalyserNode FFT and MediaStream video recording remain active
+      if (
+        this.refAudioEl &&
+        unwrappedUrl &&
+        unwrappedUrl !== this.currentRefTrackUrl &&
+        !this.refAudioEl.src.includes('cdn1.suno.ai')
+      ) {
+        this.currentRefTrackUrl = unwrappedUrl;
+        this.refAudioEl.src = unwrappedUrl;
+        this.refAudioEl.load();
+        if (this.isRunning) {
+          void this.refAudioEl.play().catch(() => {});
+        }
+        return;
+      }
+
+      // Step 2: If direct CORS playback also failed, fall back to corsFallbackAudioEl
       if (
         this.params.audioSource === 'customUrl' &&
         this.currentRefTrackUrl &&
@@ -1529,9 +1569,7 @@ export class ProceduralAudioEngine {
       ) {
         this.usingCorsFallback = true;
         this.corsFallbackAudioEl.volume = this.params.masterVolume;
-        this.corsFallbackAudioEl.src = unwrapDirectFallbackUrl(
-          this.currentRefTrackUrl
-        );
+        this.corsFallbackAudioEl.src = unwrappedUrl;
         this.corsFallbackAudioEl.load();
         if (this.isRunning) {
           void this.corsFallbackAudioEl
@@ -1600,6 +1638,12 @@ export class ProceduralAudioEngine {
     this.masterGain.connect(compressor);
     compressor.connect(this.analyser);
     this.analyser.connect(ctx.destination);
+    try {
+      this.mediaStreamDest = ctx.createMediaStreamDestination();
+      compressor.connect(this.mediaStreamDest);
+    } catch {
+      this.mediaStreamDest = null;
+    }
 
     this.dryBus = ctx.createGain();
     this.dryBus.gain.value = 1.0;
