@@ -266,7 +266,9 @@ export function resolveSongUrl(rawInput: string): {
   needsServerResolve?: boolean;
   unsupportedHint?: string;
 } {
-  const trimmed = rawInput.trim();
+  const trimmed = rawInput
+    .trim()
+    .replace(/^https?:\/\/(?=\.?\/|assets\/)/i, '');
   if (!trimmed) {
     return { url: '', title: 'No song link entered' };
   }
@@ -280,13 +282,28 @@ export function resolveSongUrl(rawInput: string): {
     };
   }
 
-  // Already a proxied or local asset URL
+  // Already a proxied or local asset URL (including Studio Masters in assets/aistudio/)
   if (
     trimmed.includes('/api/proxy-audio') ||
     trimmed.startsWith('/assets/') ||
     trimmed.startsWith('./assets/') ||
+    trimmed.startsWith('assets/') ||
     trimmed.includes('assets/aistudio/')
   ) {
+    if (trimmed.includes('assets/aistudio/')) {
+      const fileName = trimmed.split('assets/aistudio/').pop() || '';
+      const cleanRelPath = `${APP_BASE_URL}assets/aistudio/${fileName}`;
+      const matchedPreset = PRESET_SONG_LINKS.find(
+        (p) =>
+          p.url === cleanRelPath ||
+          (fileName.includes('Astral_Drift') && p.id === 'astral-drift-link') ||
+          (fileName.includes('Weightless') && p.id === 'weightless-link')
+      );
+      return {
+        url: cleanRelPath,
+        title: matchedPreset?.label || 'Studio Master Audio',
+      };
+    }
     return { url: trimmed, title: 'Linked Audio Stream' };
   }
 
@@ -1678,6 +1695,50 @@ export class ProceduralAudioEngine {
         if (this.isRunning) {
           void this.refAudioEl.play().catch(() => {});
         }
+        return;
+      }
+
+      // Step 1d: If a local Studio Master MP3 (assets/aistudio/) is missing (e.g. binary files omitted during GitHub export),
+      // seamlessly fall back to the live Procedural Studio Master arrangement so audio & shader reactivity play immediately
+      if (this.currentRefTrackUrl.includes('assets/aistudio/')) {
+        const isWeightless =
+          this.currentRefTrackUrl.includes('Weightless') ||
+          this.params.audioSource === 'weightlessMp3';
+        this.params = {
+          ...this.params,
+          audioSource: 'procedural',
+          coreDrums: {
+            ...this.params.coreDrums,
+            pattern: isWeightless ? 'weightlessDnb' : 'astralDrift',
+            bpm: isWeightless ? 174 : 94,
+            swing: isWeightless ? 0.04 : 0.14,
+            kickDecaySec: isWeightless ? 0.16 : 0.42,
+            hatToneHz: isWeightless ? 8800 : 7600,
+            hatDecaySec: isWeightless ? 0.034 : 0.048,
+          },
+          subBass: {
+            ...this.params.subBass,
+            crunchDrive: isWeightless ? 0.14 : 0.68,
+            sidechainDepth: isWeightless ? 0.38 : 0.78,
+          },
+          spatialFx: {
+            ...this.params.spatialFx,
+            reverbMix: isWeightless ? 0.68 : 0.48,
+            delayMix: isWeightless ? 0.48 : 0.38,
+            delayLeftSec: isWeightless ? 0.258 : 0.319,
+          },
+        };
+        this.applyParams(this.params);
+        if (this.ctx && this.proceduralMasterBus && this.refGainNode) {
+          const now = this.ctx.currentTime;
+          this.refGainNode.gain.setTargetAtTime(0.0, now, 0.04);
+          this.proceduralMasterBus.gain.setTargetAtTime(1.0, now, 0.04);
+        }
+        this.telemetry.trackTitle = isWeightless
+          ? 'Weightless (Studio Synth Master)'
+          : 'Astral Drift (Studio Synth Master)';
+        this.telemetry.trackStatus = 'playing';
+        this.telemetry.trackErrorMessage = undefined;
         return;
       }
 

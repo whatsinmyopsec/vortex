@@ -251,11 +251,17 @@ export const AudioSynthPanel: React.FC<AudioSynthPanelProps> = ({
       return;
     }
 
-    // Automatically prepend https:// if the user pasted e.g. suno.com/s/lX9vCx1RSB4d9bOP
+    // Clean up any accidentally prefixed https://./assets/... or http://./assets/...
+    targetInput = targetInput.replace(/^https?:\/\/(?=\.?\/|assets\/)/i, '');
+
+    // Automatically prepend https:// if the user pasted a domain without protocol (e.g. suno.com/s/lX9vCx1RSB4d9bOP)
     if (
       !targetInput.startsWith('http://') &&
       !targetInput.startsWith('https://') &&
-      !targetInput.startsWith('/')
+      !targetInput.startsWith('/') &&
+      !targetInput.startsWith('./') &&
+      !targetInput.startsWith('../') &&
+      !targetInput.startsWith('assets/')
     ) {
       targetInput = `https://${targetInput}`;
     }
