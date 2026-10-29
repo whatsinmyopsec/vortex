@@ -114,6 +114,12 @@ export const PRESET_SONG_LINKS: PresetSongLink[] = [
     url: 'https://ice1.somafm.com/vaporwaves-128-mp3',
   },
   {
+    id: 'somafm-synphaera',
+    label: 'Synphaera (Live Stream)',
+    subtitle: 'Space Ambient · Modern Electronic · Synphaera',
+    url: 'https://ice1.somafm.com/synphaera-128-mp3',
+  },
+  {
     id: 'astral-drift-link',
     label: 'Astral Drift (Studio Master)',
     subtitle: '94 BPM Heavy Bass & Crunchy Tone',
@@ -138,6 +144,61 @@ const KNOWN_SUNO_SHORTLINKS: Record<string, { uuid: string; title: string }> = {
   },
 };
 
+/**
+ * Converts any SomaFM web player or station page URL
+ * (e.g. https://somafm.com/player24/station/synphaera, https://somafm.com/synphaera/,
+ * https://somafm.com/player/#/now-playing/synphaera, https://somafm.com/synphaera.pls)
+ * into its direct CORS-enabled Icecast MP3 stream URL: https://ice1.somafm.com/<station>-128-mp3
+ */
+export function normalizeSomaFmUrl(
+  rawUrl: string
+): { streamUrl: string; title: string } | null {
+  const trimmed = rawUrl.trim();
+  const iceMatch = trimmed.match(
+    /^https?:\/\/ice\d*\.somafm\.com\/([a-z0-9_-]+?)(?:-(?:128|192|256|64|32)-(?:mp3|aac))?\/?$/i
+  );
+  if (iceMatch) {
+    const station = iceMatch[1].toLowerCase();
+    const hasFormatSuffix = /-(?:128|192|256|64|32)-(?:mp3|aac)\/?$/i.test(trimmed);
+    const streamUrl = hasFormatSuffix
+      ? trimmed.replace(/\/$/, '')
+      : `https://ice1.somafm.com/${station}-128-mp3`;
+    const preset = PRESET_SONG_LINKS.find((p) => p.url === streamUrl);
+    const prettyStation =
+      preset?.label ||
+      `${station.charAt(0).toUpperCase()}${station.slice(1)} · SomaFM (Live Stream)`;
+    return { streamUrl, title: prettyStation };
+  }
+
+  const pageMatch = trimmed.match(
+    /^https?:\/\/(?:www\.)?somafm\.com\/(?:player\d*\/station\/|player\/#\/now-playing\/|nossl\/)?([a-z0-9_-]+?)(?:130|256|128|64|32)?(?:\.pls|\.m3u|\/index\.html|\/)?(?:[?#].*)?$/i
+  );
+  if (pageMatch) {
+    const station = pageMatch[1].toLowerCase();
+    const reserved = new Set([
+      'player',
+      'player24',
+      'about',
+      'support',
+      'listen',
+      'contact',
+      'news',
+      'podcasts',
+      'articles',
+      'charts',
+    ]);
+    if (!reserved.has(station)) {
+      const streamUrl = `https://ice1.somafm.com/${station}-128-mp3`;
+      const preset = PRESET_SONG_LINKS.find((p) => p.url === streamUrl);
+      const prettyStation =
+        preset?.label ||
+        `${station.charAt(0).toUpperCase()}${station.slice(1)} · SomaFM (Live Stream)`;
+      return { streamUrl, title: prettyStation };
+    }
+  }
+  return null;
+}
+
 function isStaticHostWithoutWorker(): boolean {
   if (AUDIO_API_BASE) return false;
   if (typeof window === 'undefined') return false;
@@ -161,6 +222,10 @@ function unwrapDirectFallbackUrl(possiblyProxiedUrl: string): string {
   } catch {
     // keep raw
   }
+  const soma = normalizeSomaFmUrl(raw);
+  if (soma) {
+    return soma.streamUrl;
+  }
   // If static hosting has no backend proxy configured, fall back from AES-encrypted .m4a to Suno's unencrypted .mp4 CDN
   const sunoClipMatch = raw.match(
     /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.(?:m4a|mp3|mp4)/i
@@ -172,6 +237,10 @@ function unwrapDirectFallbackUrl(possiblyProxiedUrl: string): string {
 }
 
 function wrapWithAudioProxy(streamUrl: string): string {
+  const soma = normalizeSomaFmUrl(streamUrl);
+  if (soma) {
+    return soma.streamUrl;
+  }
   if (
     !streamUrl ||
     streamUrl.startsWith('/') ||
@@ -188,8 +257,8 @@ function wrapWithAudioProxy(streamUrl: string): string {
 }
 
 /**
- * Normalizes common song sharing links (Suno shortlinks, Suno song pages, Dropbox, GitHub,
- * Google Drive, direct audio URLs) into streamable audio URLs and extracts a clean display title.
+ * Normalizes common song sharing links (Suno shortlinks, Suno song pages, SomaFM station pages,
+ * Dropbox, GitHub, Google Drive, direct audio URLs) into streamable audio URLs and extracts a clean display title.
  */
 export function resolveSongUrl(rawInput: string): {
   url: string;
@@ -200,6 +269,15 @@ export function resolveSongUrl(rawInput: string): {
   const trimmed = rawInput.trim();
   if (!trimmed) {
     return { url: '', title: 'No song link entered' };
+  }
+
+  // 0. SomaFM player/station URLs (e.g. https://somafm.com/player24/station/synphaera) or Icecast stream URLs
+  const somaResolved = normalizeSomaFmUrl(trimmed);
+  if (somaResolved) {
+    return {
+      url: somaResolved.streamUrl,
+      title: somaResolved.title,
+    };
   }
 
   // Already a proxied or local asset URL

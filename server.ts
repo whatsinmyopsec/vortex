@@ -447,6 +447,19 @@ async function resolveExternalSongUrl(rawInput: string): Promise<{
     };
   }
 
+  // 4b. SomaFM web player / station links (e.g. https://somafm.com/player24/station/synphaera)
+  const somaPageMatch = trimmed.match(
+    /^https?:\/\/(?:www\.)?somafm\.com\/(?:player\d*\/station\/|player\/#\/now-playing\/|nossl\/)?([a-z0-9_-]+?)(?:130|256|128|64|32)?(?:\.pls|\.m3u|\/index\.html|\/)?(?:[?#].*)?$/i
+  );
+  if (somaPageMatch) {
+    const station = somaPageMatch[1].toLowerCase();
+    return {
+      ok: true,
+      streamUrl: `https://ice1.somafm.com/${station}-128-mp3`,
+      title: `${station.charAt(0).toUpperCase()}${station.slice(1)} · SomaFM (Live Stream)`,
+    };
+  }
+
   // 5. Generic URL: check if it's an HTML page with og:audio or embedded audio URL, or a direct stream
   try {
     const parsed = new URL(trimmed);
