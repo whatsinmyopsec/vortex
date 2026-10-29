@@ -1,0 +1,6 @@
+{
+  "name": "Vortex — Interactive Polar Shader Lab",
+  "description": "Interactive WebGL fragment shader playground featuring mouse-driven polar tunnel distortion, vortex warping, and live GLSL uniform controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
