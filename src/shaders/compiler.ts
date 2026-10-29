@@ -10,6 +10,12 @@ import {
   ShaderState,
 } from './types';
 
+const DEFAULT_INITIAL_LAYER_MIXES: Record<string, number> = {
+  klein4d: 0.96,
+  kaleidoscope: 0.88,
+  starfield: 0.78,
+};
+
 /**
  * Builds the default runtime state for all registered shader layers.
  */
@@ -23,7 +29,7 @@ export function buildDefaultLayersState(
       values[sub.key] = sub.defaultValue;
     }
     result[layer.id] = {
-      mix: layer.defaultMix,
+      mix: DEFAULT_INITIAL_LAYER_MIXES[layer.id] ?? 0.0,
       values,
     };
   }
@@ -37,12 +43,14 @@ export function buildDefaultLayerOrder(
   layers: ShaderLayerDefinition[] = SHADER_LAYERS
 ): string[] {
   const priorityIds = [
+    'klein4d',
+    'kaleidoscope',
+    'starfield',
     'mandelbrot',
     'julia',
     'circlepacking',
     'tunnel',
     'voronoi',
-    'starfield',
     'nebula',
   ];
   const allIds = layers.map((l) => l.id);
@@ -62,16 +70,16 @@ export function buildDefaultLayerOrder(
 
 export const DEFAULT_SHADER_STATE: ShaderState = {
   distortionMode: 0,
-  distortionStrength: 1.25,
-  swirlTwist: 1.05,
+  distortionStrength: 1.2,
+  swirlTwist: 1.0,
   polarDepth: 0.3,
   flowSpeed: 0.55,
   angularSpeed: 0.08,
   mouseSmoothing: 0.1,
-  layerBlendStyle: 0,
+  layerBlendStyle: 1,
   layerCoordSpace: 0,
-  negativeSpaceFill: 0.92,
-  negativeSpaceThreshold: 0.24,
+  negativeSpaceFill: 0.94,
+  negativeSpaceThreshold: 0.25,
   layerOrder: buildDefaultLayerOrder(SHADER_LAYERS),
   layers: buildDefaultLayersState(SHADER_LAYERS),
 };
@@ -144,6 +152,36 @@ export const SHADER_PRESETS: PresetItem[] = [
   // ============================================================================
   // NEW LAYERS & NEGATIVE-SPACE CASCADES
   // ============================================================================
+  {
+    id: 'klein4d-mandala-starfield-26-10-3',
+    name: '26. 4D Kleinian → 10. Sacred Mandala → 03. Starfield',
+    subtitle:
+      '#1 Layer 26 (4D Kleinian Inversion Lattice) cascading into #2 Layer 10 (Kaleidoscopic IFS Mandala) and #3 Layer 03 (Orbital Starfield Drift) in the deep negative space',
+    badge: 'Layers 26 → 10 → 03 Cascade',
+    category: 'new-layers',
+    mechanics: ['Layer 26 4D Kleinian', 'Layer 10 IFS Mandala', 'Layer 03 Starfield', 'Neg-Space 94%'],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.2,
+        swirlTwist: 1.0,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.94,
+        negativeSpaceThreshold: 0.25,
+        layerOrder: ['klein4d', 'kaleidoscope', 'starfield'],
+        mixes: {
+          klein4d: 0.96,
+          kaleidoscope: 0.88,
+          starfield: 0.78,
+        },
+        subValues: {
+          klein4d: { invScale: 10.0, speed: 0.25 },
+          kaleidoscope: { folds: 8.0, zoom: 1.45, morph: 1.0 },
+          starfield: { speed: 1.0, size: 0.05 },
+        },
+      }),
+  },
   {
     id: 'klein4d-inversion-cathedral',
     name: '4D Kleinian Lattice → 400-Iter Julia → 3D KIFS Crystal',

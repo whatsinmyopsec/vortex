@@ -89,7 +89,9 @@ export default function App() {
   const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null);
   const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
   const [presetCategory, setPresetCategory] = useState<'all' | PresetCategory>('all');
-  const [activePresetId, setActivePresetId] = useState<string>('audio-mandelbrot-seahorse-zoom');
+  const [activePresetId, setActivePresetId] = useState<string>(
+    'klein4d-mandala-starfield-26-10-3'
+  );
 
   const [metrics, setMetrics] = useState<CursorMetrics>({
     x: 0.0,

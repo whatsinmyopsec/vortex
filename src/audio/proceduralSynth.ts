@@ -176,7 +176,8 @@ function wrapWithAudioProxy(streamUrl: string): string {
     !streamUrl ||
     streamUrl.startsWith('/') ||
     streamUrl.startsWith('./') ||
-    streamUrl.includes('/api/proxy-audio')
+    streamUrl.includes('/api/proxy-audio') ||
+    streamUrl.includes('somafm.com')
   ) {
     return streamUrl;
   }
@@ -345,7 +346,8 @@ export async function resolveSongUrlAsync(rawInput: string): Promise<{
   if (
     (trimmed.startsWith('/') && !trimmed.startsWith('//')) ||
     trimmed.startsWith('./') ||
-    trimmed.includes('assets/aistudio/')
+    trimmed.includes('assets/aistudio/') ||
+    trimmed.includes('somafm.com')
   ) {
     return syncResult;
   }

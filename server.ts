@@ -459,8 +459,12 @@ async function resolveExternalSongUrl(rawInput: string): Promise<{
       parsed.hostname ||
       'Linked Audio Stream';
 
-    // If it already ends with an audio extension, return immediately without probing full stream
-    if (/\.(mp3|m4a|wav|ogg|oga|flac|aac)(\?|$)/i.test(trimmed)) {
+    // If it already ends with an audio extension or is a known Icecast stream, return immediately without probing full stream
+    if (
+      /\.(mp3|m4a|wav|ogg|oga|flac|aac)(\?|$)/i.test(trimmed) ||
+      trimmed.includes('somafm.com') ||
+      /-(?:128|192|256|320)-mp3$/i.test(trimmed)
+    ) {
       return {
         ok: true,
         streamUrl: trimmed,
