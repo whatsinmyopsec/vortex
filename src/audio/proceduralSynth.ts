@@ -46,7 +46,17 @@ export type AudioSourceMode =
   | 'customUrl';
 
 const APP_BASE_URL = (import.meta.env.BASE_URL || '/').replace(/\/?$/, '/');
-const AUDIO_API_BASE = (import.meta.env.VITE_AUDIO_API_BASE || '')
+const DEFAULT_STATIC_WORKER_URL =
+  'https://vortex-audio-proxy.keose.workers.dev';
+const isStaticBrowserHost =
+  typeof window !== 'undefined' &&
+  /\.(github\.io|pages\.dev|netlify\.app|vercel\.app)$/i.test(
+    window.location.hostname
+  );
+const AUDIO_API_BASE = (
+  import.meta.env.VITE_AUDIO_API_BASE ||
+  (isStaticBrowserHost ? DEFAULT_STATIC_WORKER_URL : '')
+)
   .trim()
   .replace(/\/+$/, '');
 

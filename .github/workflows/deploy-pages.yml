@@ -34,9 +34,7 @@ jobs:
 
       - name: Build static Vite bundle
         env:
-          # Optional: set VITE_AUDIO_API_BASE in GitHub Repo Settings -> Secrets and variables -> Actions -> Variables
-          # to your free Cloudflare Worker URL (e.g. https://polychrome-audio-proxy.<subdomain>.workers.dev)
-          VITE_AUDIO_API_BASE: ${{ vars.VITE_AUDIO_API_BASE }}
+          VITE_AUDIO_API_BASE: ${{ vars.VITE_AUDIO_API_BASE || 'https://vortex-audio-proxy.keose.workers.dev' }}
         run: npm run build
 
       - name: Configure GitHub Pages
