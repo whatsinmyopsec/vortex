@@ -128,16 +128,16 @@ const KNOWN_SUNO_SHORTLINKS: Record<string, { uuid: string; title: string }> = {
   },
 };
 
-function wrapWithAudioProxy(streamUrl: string): string {
-  if (
-    !streamUrl ||
-    streamUrl.startsWith('/') ||
-    streamUrl.startsWith('./') ||
-    streamUrl.includes('/api/proxy-audio')
-  ) {
-    return streamUrl;
-  }
-  return `${AUDIO_API_BASE}/api/proxy-audio?url=${encodeURIComponent(streamUrl)}`;
+function isStaticHostWithoutWorker(): boolean {
+  if (AUDIO_API_BASE) return false;
+  if (typeof window === 'undefined') return false;
+  const host = window.location.hostname.toLowerCase();
+  return (
+    host.endsWith('.github.io') ||
+    host.endsWith('.pages.dev') ||
+    host.endsWith('.netlify.app') ||
+    host.endsWith('.vercel.app')
+  );
 }
 
 function unwrapDirectFallbackUrl(possiblyProxiedUrl: string): string {
@@ -161,6 +161,21 @@ function unwrapDirectFallbackUrl(possiblyProxiedUrl: string): string {
   return raw;
 }
 
+function wrapWithAudioProxy(streamUrl: string): string {
+  if (
+    !streamUrl ||
+    streamUrl.startsWith('/') ||
+    streamUrl.startsWith('./') ||
+    streamUrl.includes('/api/proxy-audio')
+  ) {
+    return streamUrl;
+  }
+  if (isStaticHostWithoutWorker()) {
+    return unwrapDirectFallbackUrl(streamUrl);
+  }
+  return `${AUDIO_API_BASE}/api/proxy-audio?url=${encodeURIComponent(streamUrl)}`;
+}
+
 /**
  * Normalizes common song sharing links (Suno shortlinks, Suno song pages, Dropbox, GitHub,
  * Google Drive, direct audio URLs) into streamable audio URLs and extracts a clean display title.
@@ -180,6 +195,7 @@ export function resolveSongUrl(rawInput: string): {
   if (
     trimmed.includes('/api/proxy-audio') ||
     trimmed.startsWith('/assets/') ||
+    trimmed.startsWith('./assets/') ||
     trimmed.includes('assets/aistudio/')
   ) {
     return { url: trimmed, title: 'Linked Audio Stream' };
@@ -301,8 +317,9 @@ export function resolveSongUrl(rawInput: string): {
 
 /**
  * Resolves a song link asynchronously via the server-side /api/resolve-song endpoint
- * so Suno shortlinks (https://suno.com/s/...), Suno song pages, and OpenGraph audio links
- * extract their exact CloudFront/CDN stream URL and real song title.
+ * (or Cloudflare Worker when VITE_AUDIO_API_BASE is set). If running on static GitHub Pages
+ * before a Worker is configured, falls back to client-side OpenGraph resolution so Suno
+ * shortlinks still resolve and play immediately.
  */
 export async function resolveSongUrlAsync(rawInput: string): Promise<{
   url: string;
@@ -315,35 +332,81 @@ export async function resolveSongUrlAsync(rawInput: string): Promise<{
   }
 
   const trimmed = rawInput.trim();
-  if (trimmed.startsWith('/') && !trimmed.startsWith('//')) {
+  if (
+    (trimmed.startsWith('/') && !trimmed.startsWith('//')) ||
+    trimmed.startsWith('./') ||
+    trimmed.includes('assets/aistudio/')
+  ) {
     return syncResult;
   }
 
-  try {
-    const response = await fetch(
-      `${AUDIO_API_BASE}/api/resolve-song?url=${encodeURIComponent(trimmed)}`
-    );
-    if (response.ok) {
-      const data = (await response.json()) as {
-        ok?: boolean;
-        proxiedUrl?: string;
-        streamUrl?: string;
-        title?: string;
-      };
-      if (data.ok && (data.proxiedUrl || data.streamUrl)) {
-        const resolvedProxyUrl = data.proxiedUrl
-          ? data.proxiedUrl.startsWith('/') && AUDIO_API_BASE
-            ? `${AUDIO_API_BASE}${data.proxiedUrl}`
-            : data.proxiedUrl
-          : wrapWithAudioProxy(data.streamUrl || trimmed);
-        return {
-          url: resolvedProxyUrl,
-          title: data.title || syncResult.title,
+  if (!isStaticHostWithoutWorker()) {
+    try {
+      const response = await fetch(
+        `${AUDIO_API_BASE}/api/resolve-song?url=${encodeURIComponent(trimmed)}`
+      );
+      if (response.ok) {
+        const data = (await response.json()) as {
+          ok?: boolean;
+          proxiedUrl?: string;
+          streamUrl?: string;
+          title?: string;
         };
+        if (data.ok && (data.proxiedUrl || data.streamUrl)) {
+          const resolvedProxyUrl = data.proxiedUrl
+            ? data.proxiedUrl.startsWith('/') && AUDIO_API_BASE
+              ? `${AUDIO_API_BASE}${data.proxiedUrl}`
+              : data.proxiedUrl
+            : wrapWithAudioProxy(data.streamUrl || trimmed);
+          return {
+            url: resolvedProxyUrl,
+            title: data.title || syncResult.title,
+          };
+        }
       }
+    } catch {
+      // Fall back to client-side resolution if server/worker endpoint is unreachable
     }
-  } catch {
-    // Fall back to synchronous resolution if server endpoint is unreachable
+  }
+
+  // Client-side fallback for Suno shortlinks when hosted on static GitHub Pages without a Worker yet
+  if (/(?:suno\.com|suno\.ai)\//i.test(trimmed)) {
+    try {
+      const mlRes = await fetch(
+        `https://api.microlink.io/?url=${encodeURIComponent(trimmed)}`
+      );
+      if (mlRes.ok) {
+        const mlJson = (await mlRes.json()) as {
+          status?: string;
+          data?: {
+            title?: string;
+            url?: string;
+            image?: { url?: string };
+          };
+        };
+        const resolvedPageUrl = mlJson.data?.url || '';
+        const resolvedImageUrl = mlJson.data?.image?.url || '';
+        const uuidMatch =
+          resolvedPageUrl.match(
+            /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/
+          ) ||
+          resolvedImageUrl.match(
+            /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/
+          );
+        if (uuidMatch) {
+          const uuid = uuidMatch[1];
+          const cleanTitle = mlJson.data?.title
+            ? `${mlJson.data.title} · Suno`
+            : syncResult.title;
+          return {
+            url: wrapWithAudioProxy(`https://cdn1.suno.ai/${uuid}.mp4`),
+            title: cleanTitle,
+          };
+        }
+      }
+    } catch {
+      // Ignore and return syncResult
+    }
   }
 
   return syncResult;
