@@ -72,6 +72,25 @@ const SPATIAL_GRID_UNIFORMS = new Set<string>([
   'uKlein4dScale',
 ]);
 
+export interface PresetTransitionRequest {
+  id: number;
+  fromState: ShaderState;
+  durationSec: number;
+}
+
+const CROSSFADE_FRAGMENT_SHADER_SOURCE = `
+precision highp float;
+uniform sampler2D uTexFrom;
+uniform vec2 iResolution;
+uniform float uOpacity;
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / max(iResolution.xy, vec2(1.0));
+  vec4 colFrom = texture2D(uTexFrom, uv);
+  gl_FragColor = vec4(colFrom.rgb, clamp(uOpacity, 0.0, 1.0));
+}
+`;
+
 interface ShaderCanvasProps {
   state: ShaderState;
   isPaused: boolean;
@@ -79,6 +98,8 @@ interface ShaderCanvasProps {
   followMouse: boolean;
   recenterTrigger: number;
   audioBandsRef: React.MutableRefObject<AudioBandLevels>;
+  presetTransition?: PresetTransitionRequest | null;
+  onTransitionProgress?: (progress: number | null) => void;
   onUserInteract?: () => void;
   onMetricsUpdate?: (metrics: CursorMetrics) => void;
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
@@ -91,6 +112,8 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
   followMouse,
   recenterTrigger,
   audioBandsRef,
+  presetTransition = null,
+  onTransitionProgress,
   onUserInteract,
   onMetricsUpdate,
   canvasRef,
@@ -116,6 +139,16 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
   const followMouseRef = useRef<boolean>(followMouse);
   followMouseRef.current = followMouse;
 
+  const onTransitionProgressRef = useRef(onTransitionProgress);
+  onTransitionProgressRef.current = onTransitionProgress;
+
+  const activeTransitionRef = useRef<{
+    id: number;
+    fromState: ShaderState;
+    startTime: number;
+    durationSec: number;
+  } | null>(null);
+
   // Mouse state in aspect-corrected coordinates: (px - 0.5 * res.xy) / res.y
   const targetMouseRef = useRef<{ x: number; y: number }>({ x: 0.0, y: 0.0 });
   const currentMouseRef = useRef<{ x: number; y: number }>({ x: 0.0, y: 0.0 });
@@ -124,6 +157,21 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
   const pulseRef = useRef<number>(0);
   const smoothedTimeScaleRef = useRef<number>(0.0);
   const orbitPhaseRef = useRef<number>(0.0);
+
+  useEffect(() => {
+    if (!presetTransition || presetTransition.durationSec <= 0.01) {
+      activeTransitionRef.current = null;
+      onTransitionProgressRef.current?.(null);
+      return;
+    }
+    activeTransitionRef.current = {
+      id: presetTransition.id,
+      fromState: presetTransition.fromState,
+      startTime: performance.now(),
+      durationSec: presetTransition.durationSec,
+    };
+    onTransitionProgressRef.current?.(0);
+  }, [presetTransition]);
 
   useEffect(() => {
     if (recenterTrigger > 0) {
@@ -146,10 +194,16 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
 
     let animationFrameId = 0;
     let program: WebGLProgram | null = null;
+    let crossfadeProgram: WebGLProgram | null = null;
     let positionBuffer: WebGLBuffer | null = null;
+    let fboFrom: WebGLFramebuffer | null = null;
+    let fboTexture: WebGLTexture | null = null;
+    let fboWidth = 0;
+    let fboHeight = 0;
     let accumulatedTime = 12.5; // Start at a rich initial geometric phase even when waiting for music
     let lastFrameTime = performance.now();
     let lastMetricsEmit = 0;
+    let lastTransitionEmit = 0;
 
     const compileShader = (context: WebGLRenderingContext, type: number, source: string) => {
       const shader = context.createShader(type);
@@ -183,6 +237,25 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
         return null;
       }
 
+      // Compile lightweight crossfade overlay program
+      const fadeVs = compileShader(context, context.VERTEX_SHADER, VERTEX_SHADER_SOURCE);
+      const fadeFs = compileShader(
+        context,
+        context.FRAGMENT_SHADER,
+        CROSSFADE_FRAGMENT_SHADER_SOURCE
+      );
+      if (fadeVs && fadeFs) {
+        const fadeProg = context.createProgram();
+        if (fadeProg) {
+          context.attachShader(fadeProg, fadeVs);
+          context.attachShader(fadeProg, fadeFs);
+          context.linkProgram(fadeProg);
+          if (context.getProgramParameter(fadeProg, context.LINK_STATUS)) {
+            crossfadeProgram = fadeProg;
+          }
+        }
+      }
+
       context.useProgram(prog);
 
       const buf = context.createBuffer();
@@ -205,11 +278,78 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
       return prog;
     };
 
+    const ensureOffscreenFbo = (
+      context: WebGLRenderingContext,
+      width: number,
+      height: number
+    ): boolean => {
+      const targetW = Math.max(1, width);
+      const targetH = Math.max(1, height);
+      if (fboFrom && fboTexture && fboWidth === targetW && fboHeight === targetH) {
+        return true;
+      }
+      if (fboFrom) {
+        context.deleteFramebuffer(fboFrom);
+        fboFrom = null;
+      }
+      if (fboTexture) {
+        context.deleteTexture(fboTexture);
+        fboTexture = null;
+      }
+
+      const tex = context.createTexture();
+      const fb = context.createFramebuffer();
+      if (!tex || !fb) return false;
+
+      context.bindTexture(context.TEXTURE_2D, tex);
+      context.texImage2D(
+        context.TEXTURE_2D,
+        0,
+        context.RGBA,
+        targetW,
+        targetH,
+        0,
+        context.RGBA,
+        context.UNSIGNED_BYTE,
+        null
+      );
+      context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MIN_FILTER, context.LINEAR);
+      context.texParameteri(context.TEXTURE_2D, context.TEXTURE_MAG_FILTER, context.LINEAR);
+      context.texParameteri(context.TEXTURE_2D, context.TEXTURE_WRAP_S, context.CLAMP_TO_EDGE);
+      context.texParameteri(context.TEXTURE_2D, context.TEXTURE_WRAP_T, context.CLAMP_TO_EDGE);
+
+      context.bindFramebuffer(context.FRAMEBUFFER, fb);
+      context.framebufferTexture2D(
+        context.FRAMEBUFFER,
+        context.COLOR_ATTACHMENT0,
+        context.TEXTURE_2D,
+        tex,
+        0
+      );
+
+      const status = context.checkFramebufferStatus(context.FRAMEBUFFER);
+      context.bindFramebuffer(context.FRAMEBUFFER, null);
+      context.bindTexture(context.TEXTURE_2D, null);
+
+      if (status !== context.FRAMEBUFFER_COMPLETE) {
+        context.deleteFramebuffer(fb);
+        context.deleteTexture(tex);
+        return false;
+      }
+
+      fboFrom = fb;
+      fboTexture = tex;
+      fboWidth = targetW;
+      fboHeight = targetH;
+      return true;
+    };
+
     program = initWebGLResources(gl);
     if (!program) return;
 
     const getUniformLocations = (context: WebGLRenderingContext, prog: WebGLProgram) => {
       const core = {
+        aPosition: context.getAttribLocation(prog, 'aPosition'),
         iResolution: context.getUniformLocation(prog, 'iResolution'),
         iTime: context.getUniformLocation(prog, 'iTime'),
         uMouse: context.getUniformLocation(prog, 'uMouse'),
@@ -244,7 +384,21 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
       return { core, dynamicUniforms };
     };
 
+    const getCrossfadeUniformLocations = (
+      context: WebGLRenderingContext,
+      prog: WebGLProgram | null
+    ) => {
+      if (!prog) return null;
+      return {
+        aPosition: context.getAttribLocation(prog, 'aPosition'),
+        uTexFrom: context.getUniformLocation(prog, 'uTexFrom'),
+        iResolution: context.getUniformLocation(prog, 'iResolution'),
+        uOpacity: context.getUniformLocation(prog, 'uOpacity'),
+      };
+    };
+
     let uniforms = getUniformLocations(gl, program);
+    let crossfadeUniforms = getCrossfadeUniformLocations(gl, crossfadeProgram);
 
     const handleResize = () => {
       if (!canvas || !gl) return;
@@ -268,9 +422,14 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
 
     const handleContextRestored = () => {
       if (!gl) return;
+      fboFrom = null;
+      fboTexture = null;
+      fboWidth = 0;
+      fboHeight = 0;
       program = initWebGLResources(gl);
       if (program) {
         uniforms = getUniformLocations(gl, program);
+        crossfadeUniforms = getCrossfadeUniformLocations(gl, crossfadeProgram);
         handleResize();
         lastFrameTime = performance.now();
         animationFrameId = requestAnimationFrame(render);
@@ -290,10 +449,13 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
         bands.isPlaying && bands.reactivity > 0
           ? Math.max(0.0, bands.animDrive) * Math.max(0.15, bands.reactivity)
           : 0.0;
+      const bpmRatio = bands.bpmLinksDrive
+        ? Math.max(0.5, Math.min(2.0, (bands.bpm || 94) / 100.0))
+        : 1.0;
 
       // Calculate target shader time velocity with liquid-smooth inertia:
       // When "Music Controls Animation" (musicDrivesTime) is ON, shader animation glides smoothly with the music
-      // without sudden transient lurching or braking on drum hits.
+      // and scales proportionally with the tune's BPM (when bpmLinksDrive is enabled).
       let targetTimeScale = 1.0;
       if (isPausedRef.current) {
         targetTimeScale = 0.0;
@@ -301,15 +463,19 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
         if (bands.isPlaying) {
           const smoothEnergy =
             bands.rms * 0.55 + bands.sub * 0.25 + bands.beatPulse * 0.2;
-          const baseCruise = 0.55 * Math.min(1.25, Math.max(0.45, drive));
-          targetTimeScale = Math.min(1.55, baseCruise + drive * smoothEnergy * 0.38);
+          const baseCruise = 0.55 * Math.min(2.4, Math.max(0.25, drive));
+          targetTimeScale = Math.min(2.8, baseCruise + drive * smoothEnergy * 0.42);
         } else {
           // Music is stopped: coast shader animation smoothly to a standstill
           targetTimeScale = 0.0;
         }
       } else if (bands.isPlaying && drive > 0) {
-        // Free clock + gentle musical swell
-        targetTimeScale = 1.0 + drive * (bands.rms * 0.22 + bands.beatPulse * 0.1);
+        // Free clock scaled by BPM link + gentle musical swell
+        targetTimeScale =
+          bpmRatio + drive * (bands.rms * 0.22 + bands.beatPulse * 0.1);
+      } else if (bands.bpmLinksDrive) {
+        // Even before audio starts, reflect the selected BPM ratio in Free Clock mode
+        targetTimeScale = bpmRatio;
       }
 
       // Frame-rate-independent low-pass filter on time velocity so speed never snaps
@@ -357,7 +523,6 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
 
       if (gl && program) {
         handleResize();
-        gl.useProgram(program);
 
         const { core, dynamicUniforms } = uniforms;
 
@@ -367,85 +532,161 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
         const modActive = bands.isPlaying && bands.musicDrivesTime && drive > 0;
         const clampedDrive = Math.min(1.25, drive);
 
-        const effectiveDistortion = modActive
-          ? Math.min(
-              2.5,
-              Math.max(
-                0.0,
-                s.distortionStrength * (1.0 + clampedDrive * bands.rms * 0.06 * grooveSin)
+        const renderShaderPass = (
+          passState: ShaderState,
+          targetW: number,
+          targetH: number
+        ) => {
+          gl.useProgram(program);
+          if (positionBuffer && core.aPosition >= 0) {
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.enableVertexAttribArray(core.aPosition);
+            gl.vertexAttribPointer(core.aPosition, 2, gl.FLOAT, false, 0, 0);
+          }
+
+          const effectiveDistortion = modActive
+            ? Math.min(
+                2.5,
+                Math.max(
+                  0.0,
+                  passState.distortionStrength *
+                    (1.0 + clampedDrive * bands.rms * 0.06 * grooveSin)
+                )
               )
-            )
-          : s.distortionStrength;
+            : passState.distortionStrength;
 
-        const effectiveSwirl = modActive
-          ? Math.min(
-              2.5,
-              Math.max(
-                -2.5,
-                s.swirlTwist + clampedDrive * bands.mid * 0.08 * grooveCos
+          const effectiveSwirl = modActive
+            ? Math.min(
+                2.5,
+                Math.max(
+                  -2.5,
+                  passState.swirlTwist + clampedDrive * bands.mid * 0.08 * grooveCos
+                )
               )
-            )
-          : s.swirlTwist;
+            : passState.swirlTwist;
 
-        const effectiveDepth = s.polarDepth;
+          const effectiveDepth = passState.polarDepth;
 
-        gl.uniform2f(core.iResolution, canvas.width, canvas.height);
-        gl.uniform1f(core.iTime, accumulatedTime);
-        gl.uniform2f(core.uMouse, currentMouseRef.current.x, currentMouseRef.current.y);
-        gl.uniform2f(core.uMouseVel, mouseVelRef.current.x, mouseVelRef.current.y);
-        gl.uniform1f(core.uPulse, pulseRef.current);
-        gl.uniform1i(core.uMode, s.distortionMode);
-        gl.uniform1f(core.uDistortion, effectiveDistortion);
-        gl.uniform1f(core.uSwirl, effectiveSwirl);
-        gl.uniform1f(core.uDepth, effectiveDepth);
-        gl.uniform1f(core.uFlowSpeed, s.flowSpeed);
-        gl.uniform1f(core.uAngularSpeed, s.angularSpeed);
-        gl.uniform1i(core.uBlendStyle, s.layerBlendStyle);
-        gl.uniform1i(core.uCoordSpace, s.layerCoordSpace);
-        gl.uniform1f(core.uNegSpaceFill, s.negativeSpaceFill);
-        gl.uniform1f(core.uNegSpaceThreshold, s.negativeSpaceThreshold);
+          gl.uniform2f(core.iResolution, targetW, targetH);
+          gl.uniform1f(core.iTime, accumulatedTime);
+          gl.uniform2f(core.uMouse, currentMouseRef.current.x, currentMouseRef.current.y);
+          gl.uniform2f(core.uMouseVel, mouseVelRef.current.x, mouseVelRef.current.y);
+          gl.uniform1f(core.uPulse, pulseRef.current);
+          gl.uniform1i(core.uMode, passState.distortionMode);
+          gl.uniform1f(core.uDistortion, effectiveDistortion);
+          gl.uniform1f(core.uSwirl, effectiveSwirl);
+          gl.uniform1f(core.uDepth, effectiveDepth);
+          gl.uniform1f(core.uFlowSpeed, passState.flowSpeed);
+          gl.uniform1f(core.uAngularSpeed, passState.angularSpeed);
+          gl.uniform1i(core.uBlendStyle, passState.layerBlendStyle);
+          gl.uniform1i(core.uCoordSpace, passState.layerCoordSpace);
+          gl.uniform1f(core.uNegSpaceFill, passState.negativeSpaceFill);
+          gl.uniform1f(core.uNegSpaceThreshold, passState.negativeSpaceThreshold);
 
-        // Bind real-time Web Audio frequency band uniforms
-        gl.uniform1f(core.uAudioSub, bands.sub);
-        gl.uniform1f(core.uAudioMid, bands.mid);
-        gl.uniform1f(core.uAudioHigh, bands.high);
-        gl.uniform1f(core.uAudioReactivity, bands.reactivity);
+          // Bind real-time Web Audio frequency band uniforms
+          gl.uniform1f(core.uAudioSub, bands.sub);
+          gl.uniform1f(core.uAudioMid, bands.mid);
+          gl.uniform1f(core.uAudioHigh, bands.high);
+          gl.uniform1f(core.uAudioReactivity, bands.reactivity);
 
-        // Dynamically bind uniforms for every registered shader layer
-        for (let layerIdx = 0; layerIdx < SHADER_LAYERS.length; layerIdx++) {
-          const layer = SHADER_LAYERS[layerIdx];
-          const runtime = s.layers[layer.id];
-          const mixVal = runtime?.mix ?? layer.defaultMix;
-          const orderRank = s.layerOrder.indexOf(layer.id);
-          gl.uniform1f(dynamicUniforms[layer.mixUniform], mixVal);
-          gl.uniform1f(
-            dynamicUniforms[`uOrder_${layer.id}`],
-            orderRank >= 0 ? orderRank : layerIdx
-          );
+          // Dynamically bind uniforms for every registered shader layer
+          for (let layerIdx = 0; layerIdx < SHADER_LAYERS.length; layerIdx++) {
+            const layer = SHADER_LAYERS[layerIdx];
+            const runtime = passState.layers[layer.id];
+            const mixVal = runtime?.mix ?? layer.defaultMix;
+            const orderRank = passState.layerOrder.indexOf(layer.id);
+            gl.uniform1f(dynamicUniforms[layer.mixUniform], mixVal);
+            gl.uniform1f(
+              dynamicUniforms[`uOrder_${layer.id}`],
+              orderRank >= 0 ? orderRank : layerIdx
+            );
 
-          for (let subIdx = 0; subIdx < layer.subParams.length; subIdx++) {
-            const sub = layer.subParams[subIdx];
-            let subVal = runtime?.values?.[sub.key] ?? sub.defaultValue;
+            for (let subIdx = 0; subIdx < layer.subParams.length; subIdx++) {
+              const sub = layer.subParams[subIdx];
+              let subVal = runtime?.values?.[sub.key] ?? sub.defaultValue;
 
-            // Smoothly breathe only non-spatial color/tone/glow parameters on active layers via slow groove phase
-            if (
-              modActive &&
-              mixVal > 0.01 &&
-              sub.lfo.decimals !== 0 &&
-              !TIME_MULTIPLIED_UNIFORMS.has(sub.uniformName) &&
-              !SPATIAL_GRID_UNIFORMS.has(sub.uniformName)
-            ) {
-              const span = (sub.lfo.max - sub.lfo.min) * 0.08 * clampedDrive;
-              const phase = bands.groovePhase * 0.35 + sub.lfo.phase + layerIdx * 0.4;
-              const offset = span * Math.sin(phase) * bands.rms;
-              subVal = Math.min(sub.max, Math.max(sub.min, subVal + offset));
+              // Smoothly breathe only non-spatial color/tone/glow parameters on active layers via slow groove phase
+              if (
+                modActive &&
+                mixVal > 0.01 &&
+                sub.lfo.decimals !== 0 &&
+                !TIME_MULTIPLIED_UNIFORMS.has(sub.uniformName) &&
+                !SPATIAL_GRID_UNIFORMS.has(sub.uniformName)
+              ) {
+                const span = (sub.lfo.max - sub.lfo.min) * 0.08 * clampedDrive;
+                const phase = bands.groovePhase * 0.35 + sub.lfo.phase + layerIdx * 0.4;
+                const offset = span * Math.sin(phase) * bands.rms;
+                subVal = Math.min(sub.max, Math.max(sub.min, subVal + offset));
+              }
+
+              gl.uniform1f(dynamicUniforms[sub.uniformName], subVal);
             }
+          }
 
-            gl.uniform1f(dynamicUniforms[sub.uniformName], subVal);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+        };
+
+        // Evaluate active preset crossfade progress (uses wall-clock time so transitions work even when paused)
+        let activeFade = activeTransitionRef.current;
+        let rawProgress = 1.0;
+        if (activeFade) {
+          const elapsedSec = Math.max(0, (now - activeFade.startTime) / 1000);
+          rawProgress = elapsedSec / Math.max(0.01, activeFade.durationSec);
+          if (rawProgress >= 1.0) {
+            activeTransitionRef.current = null;
+            activeFade = null;
+            onTransitionProgressRef.current?.(null);
+          } else if (now - lastTransitionEmit > 50) {
+            lastTransitionEmit = now;
+            onTransitionProgressRef.current?.(rawProgress);
           }
         }
 
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        if (
+          activeFade &&
+          crossfadeProgram &&
+          crossfadeUniforms &&
+          ensureOffscreenFbo(gl, canvas.width, canvas.height)
+        ) {
+          // Smooth cosine S-curve ease between 0.0 and 1.0
+          const t = 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, Math.max(0, rawProgress)));
+
+          // Pass 1: Render outgoing preset (live-animated!) into offscreen texture fboFrom
+          gl.bindFramebuffer(gl.FRAMEBUFFER, fboFrom);
+          gl.viewport(0, 0, fboWidth, fboHeight);
+          gl.disable(gl.BLEND);
+          renderShaderPass(activeFade.fromState, fboWidth, fboHeight);
+
+          // Pass 2: Render incoming preset (live-animated!) directly onto main canvas
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+          gl.viewport(0, 0, canvas.width, canvas.height);
+          renderShaderPass(s, canvas.width, canvas.height);
+
+          // Pass 3: Alpha-blend outgoing preset texture over incoming preset with opacity (1.0 - t)
+          gl.useProgram(crossfadeProgram);
+          if (positionBuffer && crossfadeUniforms.aPosition >= 0) {
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.enableVertexAttribArray(crossfadeUniforms.aPosition);
+            gl.vertexAttribPointer(crossfadeUniforms.aPosition, 2, gl.FLOAT, false, 0, 0);
+          }
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, fboTexture);
+          gl.uniform1i(crossfadeUniforms.uTexFrom, 0);
+          gl.uniform2f(crossfadeUniforms.iResolution, canvas.width, canvas.height);
+          gl.uniform1f(crossfadeUniforms.uOpacity, 1.0 - t);
+
+          gl.enable(gl.BLEND);
+          gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+          gl.colorMask(true, true, true, false); // Keep canvas alpha = 1.0 for PNG/Video capture
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+          gl.colorMask(true, true, true, true);
+          gl.disable(gl.BLEND);
+          gl.bindTexture(gl.TEXTURE_2D, null);
+        } else {
+          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+          gl.viewport(0, 0, canvas.width, canvas.height);
+          renderShaderPass(s, canvas.width, canvas.height);
+        }
       }
 
       if (onMetricsUpdate && now - lastMetricsEmit > 65) {
@@ -478,6 +719,15 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
       canvas.removeEventListener('webglcontextrestored', handleContextRestored);
       if (gl && program) {
         gl.deleteProgram(program);
+      }
+      if (gl && crossfadeProgram) {
+        gl.deleteProgram(crossfadeProgram);
+      }
+      if (gl && fboFrom) {
+        gl.deleteFramebuffer(fboFrom);
+      }
+      if (gl && fboTexture) {
+        gl.deleteTexture(fboTexture);
       }
       if (gl && positionBuffer) {
         gl.deleteBuffer(positionBuffer);

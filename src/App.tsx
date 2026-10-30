@@ -9,6 +9,8 @@ import {
   ArrowLeftRight,
   ArrowUpDown,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Code2,
   Compass,
   Copy,
@@ -38,7 +40,11 @@ import {
 } from './audio/proceduralSynth';
 import { AudioSynthPanel } from './components/AudioSynthPanel';
 import { LayerCard } from './components/LayerCard';
-import { CursorMetrics, ShaderCanvas } from './components/ShaderCanvas';
+import {
+  CursorMetrics,
+  PresetTransitionRequest,
+  ShaderCanvas,
+} from './components/ShaderCanvas';
 import { DISTORTION_MODES, LAYER_BLEND_STYLES } from './shaders/commonGlsl';
 import {
   buildDefaultLayersState,
@@ -53,6 +59,7 @@ import {
   LayerCoordSpace,
   LayerRuntimeState,
   PresetCategory,
+  PresetItem,
   ShaderLayerDefinition,
   ShaderState,
 } from './shaders/types';
@@ -72,6 +79,22 @@ type CaptureMode =
   | 'recording-video'
   | 'encoding-video';
 
+function cloneShaderState(s: ShaderState): ShaderState {
+  const clonedLayers: Record<string, LayerRuntimeState> = {};
+  for (const key of Object.keys(s.layers)) {
+    const item = s.layers[key];
+    clonedLayers[key] = {
+      mix: item.mix,
+      values: { ...item.values },
+    };
+  }
+  return {
+    ...s,
+    layerOrder: [...s.layerOrder],
+    layers: clonedLayers,
+  };
+}
+
 export default function App() {
   const [state, setState] = useState<ShaderState>(DEFAULT_SHADER_STATE);
   const [activeTab, setActiveTab] = useState<HudSection>('layers');
@@ -84,7 +107,7 @@ export default function App() {
   const [recenterTrigger, setRecenterTrigger] = useState<number>(1);
   const [isAnimatingSliders, setIsAnimatingSliders] = useState<boolean>(false);
   const [copiedGlsl, setCopiedGlsl] = useState<boolean>(false);
-  const [isAudioPlaying, setIsAudioPlaying] = useState<boolean>(false);
+  const [isAudioPlaying, setIsAudioPlaying] = useState<boolean>(true);
   const [musicDrivesTime, setMusicDrivesTime] = useState<boolean>(true);
   const [draggedLayerId, setDraggedLayerId] = useState<string | null>(null);
   const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
@@ -92,6 +115,10 @@ export default function App() {
   const [activePresetId, setActivePresetId] = useState<string>(
     'klein4d-mandala-starfield-26-10-3'
   );
+  const [presetFadeDuration, setPresetFadeDuration] = useState<number>(1.8);
+  const [presetTransition, setPresetTransition] =
+    useState<PresetTransitionRequest | null>(null);
+  const [transitionProgress, setTransitionProgress] = useState<number | null>(null);
 
   const [metrics, setMetrics] = useState<CursorMetrics>({
     x: 0.0,
@@ -470,13 +497,63 @@ export default function App() {
     return rankMap;
   }, [activeOrderedLayers]);
 
+  const handleSelectPreset = useCallback(
+    (preset: PresetItem) => {
+      setActivePresetId(preset.id);
+      setState((prev) => {
+        if (presetFadeDuration > 0.01) {
+          setPresetTransition({
+            id: Date.now() + Math.random(),
+            fromState: cloneShaderState(prev),
+            durationSec: presetFadeDuration,
+          });
+        } else {
+          setPresetTransition(null);
+        }
+        return preset.apply(prev);
+      });
+    },
+    [presetFadeDuration]
+  );
+
+  const filteredPresets = useMemo(
+    () =>
+      SHADER_PRESETS.filter(
+        (p) => presetCategory === 'all' || p.category === presetCategory
+      ),
+    [presetCategory]
+  );
+
+  const handleStepPreset = useCallback(
+    (direction: -1 | 1) => {
+      const list = filteredPresets.length > 0 ? filteredPresets : SHADER_PRESETS;
+      if (list.length === 0) return;
+      const currentIdx = list.findIndex((p) => p.id === activePresetId);
+      const nextIdx =
+        currentIdx < 0
+          ? 0
+          : (currentIdx + direction + list.length) % list.length;
+      handleSelectPreset(list[nextIdx]);
+    },
+    [activePresetId, filteredPresets, handleSelectPreset]
+  );
+
   const handleReset = () => {
     setIsAnimatingSliders(false);
     setAutoOrbit(false);
     setIsPaused(false);
-    setState({
-      ...DEFAULT_SHADER_STATE,
-      layers: buildDefaultLayersState(SHADER_LAYERS),
+    setState((prev) => {
+      if (presetFadeDuration > 0.01) {
+        setPresetTransition({
+          id: Date.now() + Math.random(),
+          fromState: cloneShaderState(prev),
+          durationSec: presetFadeDuration,
+        });
+      }
+      return {
+        ...DEFAULT_SHADER_STATE,
+        layers: buildDefaultLayersState(SHADER_LAYERS),
+      };
     });
   };
 
@@ -739,6 +816,8 @@ export default function App() {
           followMouse={followMouse}
           recenterTrigger={recenterTrigger}
           audioBandsRef={audioBandsRef}
+          presetTransition={presetTransition}
+          onTransitionProgress={setTransitionProgress}
           onUserInteract={() => setAutoOrbit(false)}
           onMetricsUpdate={setMetrics}
         />
@@ -1561,13 +1640,101 @@ export default function App() {
                         <h2 className="text-sm font-semibold text-white">
                           Curated Modular Presets ({SHADER_PRESETS.length})
                         </h2>
-                        <span className="text-[11px] font-mono text-amber-400">
-                          Neg-Space + Priority Stack
-                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleStepPreset(-1)}
+                            title="Crossfade to previous preset"
+                            className="inline-flex items-center gap-0.5 px-2 py-1 rounded-md text-[11px] font-medium bg-white/5 border border-white/10 text-neutral-200 hover:bg-amber-500/20 hover:border-amber-400/50 hover:text-amber-200 transition-colors cursor-pointer"
+                          >
+                            <ChevronLeft className="w-3 h-3 text-amber-400" />
+                            <span>Prev</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleStepPreset(1)}
+                            title="Crossfade to next preset"
+                            className="inline-flex items-center gap-0.5 px-2 py-1 rounded-md text-[11px] font-medium bg-white/5 border border-white/10 text-neutral-200 hover:bg-amber-500/20 hover:border-amber-400/50 hover:text-amber-200 transition-colors cursor-pointer"
+                          >
+                            <span>Next</span>
+                            <ChevronRight className="w-3 h-3 text-amber-400" />
+                          </button>
+                        </div>
                       </div>
                       <p className="text-xs text-neutral-400">
                         Each preset configures active layers, priority order (#1 → #N negative-space cascade), coordinate space, and audio-reactive sub-parameters.
                       </p>
+                    </div>
+
+                    {/* Smooth Preset Crossfade Controls */}
+                    <div className="p-2.5 rounded-lg bg-white/[0.04] border border-white/10 space-y-2">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="font-semibold text-amber-300">
+                          Preset Crossfade Transition
+                        </span>
+                        <span className="font-mono tabular-nums text-amber-400">
+                          {presetFadeDuration <= 0.01
+                            ? 'Instant (0.0s)'
+                            : `${presetFadeDuration.toFixed(1)}s Dissolve`}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range"
+                          min="0.0"
+                          max="5.0"
+                          step="0.1"
+                          value={presetFadeDuration}
+                          onChange={(e) =>
+                            setPresetFadeDuration(parseFloat(e.target.value))
+                          }
+                          aria-label="Preset Crossfade Duration in Seconds"
+                          className="flex-1 hud-slider"
+                        />
+                        <div className="flex items-center gap-1 shrink-0">
+                          {[
+                            { label: '0s', val: 0.0 },
+                            { label: '1.0s', val: 1.0 },
+                            { label: '1.8s', val: 1.8 },
+                            { label: '3.5s', val: 3.5 },
+                          ].map((opt) => {
+                            const active =
+                              Math.abs(presetFadeDuration - opt.val) < 0.05;
+                            return (
+                              <button
+                                key={opt.label}
+                                type="button"
+                                onClick={() => setPresetFadeDuration(opt.val)}
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors cursor-pointer ${
+                                  active
+                                    ? 'bg-amber-400 text-neutral-950 border-amber-300 font-semibold'
+                                    : 'bg-white/5 border-white/10 text-neutral-300 hover:bg-white/10 hover:text-white'
+                                }`}
+                              >
+                                {opt.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {transitionProgress !== null && (
+                        <div className="space-y-1 pt-0.5">
+                          <div className="flex items-center justify-between text-[10px] font-mono text-amber-300">
+                            <span>Crossfading live shader passes...</span>
+                            <span>{Math.round(transitionProgress * 100)}%</span>
+                          </div>
+                          <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+                            <div
+                              className="h-full bg-amber-400 transition-all duration-75"
+                              style={{
+                                width: `${Math.min(100, Math.max(0, transitionProgress * 100))}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Quick Mechanic Mutators for Active Preset */}
@@ -1649,18 +1816,13 @@ export default function App() {
                     </div>
 
                     <div className="space-y-2">
-                      {SHADER_PRESETS.filter(
-                        (p) => presetCategory === 'all' || p.category === presetCategory
-                      ).map((preset) => {
+                      {filteredPresets.map((preset) => {
                         const isSelected = activePresetId === preset.id;
                         return (
                           <button
                             key={preset.id}
                             type="button"
-                            onClick={() => {
-                              setActivePresetId(preset.id);
-                              setState((prev) => preset.apply(prev));
-                            }}
+                            onClick={() => handleSelectPreset(preset)}
                             className={`w-full p-3.5 rounded-lg text-left border transition-colors cursor-pointer ${
                               isSelected
                                 ? 'bg-amber-500/15 border-amber-400/70 text-white'

@@ -153,6 +153,43 @@ export const SHADER_PRESETS: PresetItem[] = [
   // NEW LAYERS & NEGATIVE-SPACE CASCADES
   // ============================================================================
   {
+    id: 'ferrofluid-penrose-starfield-accretion-11-14-03-05',
+    name: '11. Ferrofluid → 14. Penrose → 03. Starfield → 05. Accretion',
+    subtitle:
+      '#1 Layer 11 (Iridescent Ferrofluid 40%) cascading into #2 Layer 14 (Quasicrystal Penrose 65%), #3 Layer 03 (Orbital Starfield 50%), and #4 Layer 05 (Event Horizon Accretion 98%)',
+    badge: 'Layers 11 → 14 → 03 → 05 Cascade',
+    category: 'new-layers',
+    mechanics: [
+      'Layer 11 Ferrofluid 40%',
+      'Layer 14 Penrose 65%',
+      'Layer 03 Starfield 50%',
+      'Layer 05 Accretion 98%',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.25,
+        swirlTwist: 1.05,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.94,
+        negativeSpaceThreshold: 0.25,
+        layerOrder: ['liquidoil', 'quantumweb', 'starfield', 'accretion'],
+        mixes: {
+          liquidoil: 0.4,
+          quantumweb: 0.65,
+          starfield: 0.5,
+          accretion: 0.98,
+        },
+        subValues: {
+          liquidoil: { density: 3.8, viscosity: 1.25, iridescence: 5.0 },
+          quantumweb: { scale: 18.0, sharpness: 2.8 },
+          starfield: { speed: 1.0, size: 0.05 },
+          accretion: { radius: 0.12, spin: 0.75 },
+        },
+      }),
+  },
+  {
     id: 'klein4d-mandala-starfield-26-10-3',
     name: '26. 4D Kleinian → 10. Sacred Mandala → 03. Starfield',
     subtitle:

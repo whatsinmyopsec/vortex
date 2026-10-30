@@ -13,7 +13,9 @@ export interface AudioBandLevels {
   groovePhase: number; // Continuous BPM-locked musical phase
   isPlaying: boolean; // True when procedural synth is actively playing
   musicDrivesTime: boolean; // When true, music controls shader iTime velocity & parameter morphing
-  animDrive: number; // 0.0 - 2.5 (How strongly music drives shader animation speed & morphing)
+  animDrive: number; // 0.0 - 3.5 (Effective shader animation speed drive, scaled by BPM when bpmLinksDrive is true)
+  bpm: number; // Live tune tempo in BPM (configured synth BPM or real-time detected stream BPM)
+  bpmLinksDrive: boolean; // When true, Animation Speed Drive scales proportionally with the tune's BPM
 }
 
 export const DEFAULT_AUDIO_BAND_LEVELS: AudioBandLevels = {
@@ -24,10 +26,51 @@ export const DEFAULT_AUDIO_BAND_LEVELS: AudioBandLevels = {
   reactivity: 1.0,
   beatPulse: 0,
   groovePhase: 0,
-  isPlaying: false,
+  isPlaying: true,
   musicDrivesTime: true,
-  animDrive: 1.25,
+  animDrive: 1.08,
+  bpm: 86,
+  bpmLinksDrive: true,
 };
+
+/**
+ * Computes the BPM-to-Animation-Drive multiplier normalized around 100 BPM = 1.00x.
+ * E.g. 70 BPM -> 0.70x, 94 BPM -> 0.94x, 128 BPM -> 1.28x, 174 BPM -> 1.74x.
+ */
+export function computeBpmDriveScale(bpm: number): number {
+  const clamped = Math.max(50, Math.min(200, Number.isFinite(bpm) ? bpm : 94));
+  return clamped / 100.0;
+}
+
+/**
+ * Estimates initial seed BPM from a track URL or title before real-time onset detection refines it.
+ */
+export function estimateSeedBpmFromTrack(
+  url?: string,
+  title?: string,
+  fallbackBpm = 94
+): number {
+  const combined = `${url || ''} ${title || ''}`.toLowerCase();
+  const explicitBpmMatch = combined.match(/\b(\d{2,3})\s*bpm\b/i);
+  if (explicitBpmMatch) {
+    const parsed = parseInt(explicitBpmMatch[1], 10);
+    if (parsed >= 55 && parsed <= 200) return parsed;
+  }
+  if (combined.includes('weightless')) return 174;
+  if (combined.includes('astral_drift') || combined.includes('astral drift')) return 94;
+  if (combined.includes('suburbsofgoa') || combined.includes('suburbs of goa')) return 118;
+  if (combined.includes('defcon')) return 128;
+  if (combined.includes('synphaera')) return 86;
+  if (combined.includes('spacestation')) return 96;
+  if (combined.includes('vaporwaves')) return 104;
+  if (combined.includes('lX9vCx1RSB4d9bOP'.toLowerCase()) || combined.includes('peak satisfaction')) {
+    return 124;
+  }
+  if (combined.includes('35tZN3FK6QJCpt0S'.toLowerCase())) {
+    return 132;
+  }
+  return fallbackBpm;
+}
 
 export type DrumPatternId =
   | 'astralDrift'
@@ -78,6 +121,12 @@ export interface PresetSongLink {
 
 export const PRESET_SONG_LINKS: PresetSongLink[] = [
   {
+    id: 'somafm-synphaera',
+    label: 'Synphaera (Live Stream)',
+    subtitle: 'Space Ambient · Modern Electronic · Synphaera',
+    url: 'https://ice1.somafm.com/synphaera-128-mp3',
+  },
+  {
     id: 'suno-peak-satisfaction',
     label: 'Peak Satisfaction (lX9vCx1RSB4d9bOP)',
     subtitle: 'Peak Satisfaction (The Unboxing) · Suno AI',
@@ -112,12 +161,6 @@ export const PRESET_SONG_LINKS: PresetSongLink[] = [
     label: 'Vaporwaves FM (Live Stream)',
     subtitle: 'Synthwave · Future Funk · Chillwave',
     url: 'https://ice1.somafm.com/vaporwaves-128-mp3',
-  },
-  {
-    id: 'somafm-synphaera',
-    label: 'Synphaera (Live Stream)',
-    subtitle: 'Space Ambient · Modern Electronic · Synphaera',
-    url: 'https://ice1.somafm.com/synphaera-128-mp3',
   },
   {
     id: 'astral-drift-link',
@@ -534,6 +577,7 @@ export interface SynthParams {
     highShiftPlasma: number; // 0.0 to 2.5
     musicDrivesTime: boolean; // Music controls shader animation clock & parameter morphing
     animDrive: number; // 0.0 to 2.5
+    bpmLinksDrive: boolean; // Scale Animation Speed Drive with the tune's live BPM
   };
 
   // Core Percussion & Rhythm Sequencer (Kicks, Hi-Hats, Snare, Crunchy Acid Pluck)
@@ -644,9 +688,9 @@ export interface SynthParams {
 export const DEFAULT_SYNTH_PARAMS: SynthParams = {
   masterVolume: 0.82,
   cursorCoupling: true,
-  audioSource: 'procedural',
-  customAudioUrl: '',
-  customAudioTitle: '',
+  audioSource: 'customUrl',
+  customAudioUrl: 'https://ice1.somafm.com/synphaera-128-mp3',
+  customAudioTitle: 'Synphaera (Live Stream)',
 
   audioReactive: {
     enabled: true,
@@ -655,6 +699,7 @@ export const DEFAULT_SYNTH_PARAMS: SynthParams = {
     highShiftPlasma: 1.0,
     musicDrivesTime: true,
     animDrive: 1.25,
+    bpmLinksDrive: true,
   },
 
   coreDrums: {
@@ -778,6 +823,8 @@ export interface SynthLiveTelemetry {
   trackStatus?: 'idle' | 'loading' | 'playing' | 'paused' | 'cors-fallback' | 'error';
   trackErrorMessage?: string;
   trackTitle?: string;
+  effectiveBpm?: number;
+  effectiveAnimDrive?: number;
 }
 
 // E Minor Natural / Dorian Scale for Crystal Arpeggios & Pings
@@ -1250,6 +1297,12 @@ export class ProceduralAudioEngine {
   private groovePhase = 0;
   private lastBandTickTime = 0;
 
+  // Real-time onset beat-interval BPM detector for external tunes & streams
+  private detectedTrackBpm = 86;
+  private lastOnsetTimeSec = 0;
+  private onsetIntervalsSec: number[] = [];
+  private prevSubFlux = 0;
+
   private rafId: number | null = null;
   private startTime = 0;
 
@@ -1273,6 +1326,9 @@ export class ProceduralAudioEngine {
     stepsPerBeat: 4,
     currentChordName: 'Em9',
     currentSectionName: 'Astral Drift · Heavy Bass & Crunch',
+    trackTitle: 'Synphaera (Live Stream)',
+    effectiveBpm: 86,
+    effectiveAnimDrive: 1.08,
   };
 
   /**
@@ -1311,6 +1367,8 @@ export class ProceduralAudioEngine {
         }
       };
       window.addEventListener('pointerdown', resumeOnInteract, { passive: true });
+      window.addEventListener('touchstart', resumeOnInteract, { passive: true });
+      window.addEventListener('click', resumeOnInteract, { passive: true });
       window.addEventListener('keydown', resumeOnInteract, { passive: true });
     }
   }
@@ -1322,7 +1380,7 @@ export class ProceduralAudioEngine {
     if (!this.ctx) return;
 
     this.nextStepTime = this.ctx.currentTime + 0.04;
-    this.lastBandTickTime = this.ctx.currentTime;
+    this.lastBandTickTime = performance.now() * 0.001;
     this.isRunning = true;
     this.smoothedBands.isPlaying = true;
     this.applyParams(this.params);
@@ -1433,12 +1491,19 @@ export class ProceduralAudioEngine {
       targetArray.fill(128);
       return;
     }
-    if (
-      this.usingCorsFallback &&
-      this.corsFallbackAudioEl &&
-      !this.corsFallbackAudioEl.paused
-    ) {
-      // Synthesize live visual oscilloscope wave when playing a non-CORS external stream
+    const activeEl = this.usingCorsFallback
+      ? this.corsFallbackAudioEl
+      : this.refAudioEl;
+    const isWaitingOrFallbackStream =
+      this.params.audioSource !== 'procedural' &&
+      ((this.usingCorsFallback &&
+        this.corsFallbackAudioEl &&
+        !this.corsFallbackAudioEl.paused) ||
+        this.ctx?.state === 'suspended' ||
+        !activeEl ||
+        activeEl.paused);
+    if (isWaitingOrFallbackStream) {
+      // Synthesize live visual oscilloscope wave when playing a non-CORS external stream or buffering initial stream
       const now = performance.now() * 0.004;
       const amp = 28 * (0.35 + this.smoothedBands.rms * 0.85);
       for (let i = 0; i < targetArray.length; i++) {
@@ -1542,6 +1607,13 @@ export class ProceduralAudioEngine {
         (forceReload || this.currentRefTrackUrl !== targetUrl)
       ) {
         this.currentRefTrackUrl = targetUrl;
+        this.detectedTrackBpm = estimateSeedBpmFromTrack(
+          targetUrl,
+          trackTitle,
+          this.params.coreDrums.bpm
+        );
+        this.onsetIntervalsSec = [];
+        this.lastOnsetTimeSec = 0;
         this.usingCorsFallback = false;
         if (this.corsFallbackAudioEl) {
           this.corsFallbackAudioEl.pause();
@@ -3362,13 +3434,12 @@ export class ProceduralAudioEngine {
       return;
     }
 
-    const now = this.ctx.currentTime;
-    const dt = Math.min(0.1, Math.max(0.001, now - this.lastBandTickTime));
-    this.lastBandTickTime = now;
+    const wallNow = performance.now() * 0.001;
+    const now = this.ctx.state === 'running' ? this.ctx.currentTime : wallNow;
+    const dt = Math.min(0.1, Math.max(0.001, wallNow - this.lastBandTickTime));
+    this.lastBandTickTime = wallNow;
 
-    // Advance BPM-synchronized musical groove phase (1 full cycle per 4-beat bar for smooth modulation)
-    const beatsPerSec = Math.max(40, this.params.coreDrums.bpm) / 60.0;
-    this.groovePhase += dt * beatsPerSec * Math.PI * 0.5;
+    const isExternalTrack = this.params.audioSource !== 'procedural';
 
     // Gentle exponential decay of percussion & synth note envelopes
     const envDecay = Math.exp(-dt * 3.6);
@@ -3378,8 +3449,6 @@ export class ProceduralAudioEngine {
     this.hatEnv *= Math.exp(-dt * 4.8);
 
     this.analyser.getByteFrequencyData(this.freqBins);
-
-    const isExternalTrack = this.params.audioSource !== 'procedural';
 
     let subSum = 0;
     for (let i = 0; i <= 4; i++) subSum += this.freqBins[i];
@@ -3396,26 +3465,91 @@ export class ProceduralAudioEngine {
     const rawHighNorm = Math.min(1.0, (highSum / (60 * 255)) * 2.1);
     let fftHigh = Math.pow(rawHighNorm, 1.08);
 
-    // If playing a non-CORS external stream via corsFallbackAudioEl, synthesize dynamic musical band envelopes
-    if (
+    const activeEl = this.usingCorsFallback
+      ? this.corsFallbackAudioEl
+      : this.refAudioEl;
+    const isStreamBufferingOrAwaitingGesture =
       isExternalTrack &&
-      this.usingCorsFallback &&
-      this.corsFallbackAudioEl &&
-      !this.corsFallbackAudioEl.paused
-    ) {
-      const t = now * 2.2;
-      const beatWave = Math.pow(0.5 + 0.5 * Math.sin(t * Math.PI), 3.0);
-      fftSub = 0.38 + beatWave * 0.54;
-      fftMid = 0.32 + (0.5 + 0.5 * Math.sin(t * 1.618 + 0.8)) * 0.48;
-      fftHigh = 0.24 + (0.5 + 0.5 * Math.cos(t * 3.14 + 1.7)) * 0.45;
+      rawSubNorm < 0.005 &&
+      rawMidNorm < 0.005 &&
+      ((this.usingCorsFallback &&
+        this.corsFallbackAudioEl &&
+        !this.corsFallbackAudioEl.paused) ||
+        this.ctx.state === 'suspended' ||
+        !activeEl ||
+        activeEl.paused);
+
+    // If playing a non-CORS external stream via corsFallbackAudioEl or while initial stream buffers/unlocks, synthesize dynamic musical band envelopes
+    if (isStreamBufferingOrAwaitingGesture) {
+      const fallbackBeatRate = Math.max(60, this.detectedTrackBpm) / 60.0;
+      const t = wallNow * fallbackBeatRate;
+      const beatWave = Math.pow(0.5 + 0.5 * Math.sin(t * Math.PI * 2.0), 3.0);
+      fftSub = 0.34 + beatWave * 0.48;
+      fftMid = 0.28 + (0.5 + 0.5 * Math.sin(t * 1.618 + 0.8)) * 0.44;
+      fftHigh = 0.22 + (0.5 + 0.5 * Math.cos(t * 3.14 + 1.7)) * 0.4;
     }
 
-    // Spectral flux transient kick detector for external tracks & song links
+    // Spectral flux transient kick detector + real-time beat-interval BPM estimator for external tracks & song links
     const subFlux = Math.max(0, fftSub - this.prevFftSub);
     this.prevFftSub = fftSub;
     if (isExternalTrack && subFlux > 0.04) {
       this.kickEnv = Math.min(1.0, this.kickEnv + subFlux * 3.2);
+
+      // Detect distinct kick/bass onset peaks to estimate external tune BPM in real time
+      if (
+        !this.usingCorsFallback &&
+        subFlux > 0.052 &&
+        subFlux >= this.prevSubFlux &&
+        fftSub > 0.26
+      ) {
+        const sinceLastOnset = now - this.lastOnsetTimeSec;
+        if (sinceLastOnset >= 0.28) {
+          if (sinceLastOnset <= 1.85 && this.lastOnsetTimeSec > 0) {
+            let candidateBpm = 60.0 / sinceLastOnset;
+            // Fold half-time or double-time intervals toward the natural 75-180 BPM musical range
+            while (candidateBpm < 72) candidateBpm *= 2.0;
+            while (candidateBpm > 182) candidateBpm *= 0.5;
+
+            // Keep octave consistency with known high-tempo tracks (e.g. Weightless 174 BPM)
+            const seedBpm = estimateSeedBpmFromTrack(
+              this.currentRefTrackUrl,
+              this.telemetry.trackTitle,
+              0
+            );
+            if (seedBpm >= 155 && candidateBpm < 105) {
+              candidateBpm *= 2.0;
+            } else if (seedBpm > 0 && seedBpm <= 102 && candidateBpm > 155) {
+              candidateBpm *= 0.5;
+            }
+
+            if (candidateBpm >= 65 && candidateBpm <= 190) {
+              this.onsetIntervalsSec.push(60.0 / candidateBpm);
+              if (this.onsetIntervalsSec.length > 9) {
+                this.onsetIntervalsSec.shift();
+              }
+              if (this.onsetIntervalsSec.length >= 3) {
+                const sorted = [...this.onsetIntervalsSec].sort((a, b) => a - b);
+                const medianInterval = sorted[Math.floor(sorted.length / 2)];
+                const medianBpm = 60.0 / medianInterval;
+                this.detectedTrackBpm +=
+                  (medianBpm - this.detectedTrackBpm) * 0.22;
+              }
+            }
+          }
+          this.lastOnsetTimeSec = now;
+        }
+      }
     }
+    this.prevSubFlux = subFlux;
+
+    // Determine live effective BPM of the currently playing tune
+    const effectiveBpm = isExternalTrack
+      ? Math.max(55, Math.min(200, this.detectedTrackBpm))
+      : Math.max(55, Math.min(200, this.params.coreDrums.bpm));
+
+    // Advance BPM-synchronized musical groove phase (1 full cycle per 4-beat bar for smooth modulation)
+    const beatsPerSec = effectiveBpm / 60.0;
+    this.groovePhase += dt * beatsPerSec * Math.PI * 0.5;
 
     const combinedSub = isExternalTrack
       ? Math.min(1.0, fftSub * 0.95 + this.kickEnv * 0.35)
@@ -3459,6 +3593,14 @@ export class ProceduralAudioEngine {
     const beatLerp = rawBeat > this.smoothedBands.beatPulse ? beatAttack : beatRelease;
     this.smoothedBands.beatPulse += (rawBeat - this.smoothedBands.beatPulse) * beatLerp;
 
+    const bpmScale = this.params.audioReactive.bpmLinksDrive
+      ? computeBpmDriveScale(effectiveBpm)
+      : 1.0;
+    const effectiveAnimDrive = Math.min(
+      3.5,
+      Math.max(0.05, this.params.audioReactive.animDrive * bpmScale)
+    );
+
     this.smoothedBands.rms =
       this.smoothedBands.sub * 0.45 +
       this.smoothedBands.mid * 0.35 +
@@ -3469,11 +3611,15 @@ export class ProceduralAudioEngine {
       ? this.params.audioReactive.reactivity
       : 0.0;
     this.smoothedBands.musicDrivesTime = this.params.audioReactive.musicDrivesTime;
-    this.smoothedBands.animDrive = this.params.audioReactive.animDrive;
+    this.smoothedBands.bpm = effectiveBpm;
+    this.smoothedBands.bpmLinksDrive = this.params.audioReactive.bpmLinksDrive;
+    this.smoothedBands.animDrive = effectiveAnimDrive;
 
     this.telemetry.bandSub = Math.min(1.0, this.smoothedBands.sub);
     this.telemetry.bandMid = Math.min(1.0, this.smoothedBands.mid);
     this.telemetry.bandHigh = Math.min(1.0, this.smoothedBands.high);
+    this.telemetry.effectiveBpm = Math.round(effectiveBpm);
+    this.telemetry.effectiveAnimDrive = effectiveAnimDrive;
   }
 
   private startProceduralLoop(): void {

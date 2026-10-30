@@ -26,9 +26,11 @@ import {
 } from 'lucide-react';
 import {
   AudioBandLevels,
+  computeBpmDriveScale,
   DEFAULT_SYNTH_PARAMS,
   DRUM_PATTERNS,
   DrumPatternId,
+  estimateSeedBpmFromTrack,
   PRESET_SONG_LINKS,
   ProceduralAudioEngine,
   resolveSongUrl,
@@ -75,12 +77,13 @@ export const AudioSynthPanel: React.FC<AudioSynthPanelProps> = ({
   externalGetAudioStreamRef,
 }) => {
   const [params, setParams] = useState<SynthParams>(DEFAULT_SYNTH_PARAMS);
-  const [isAudioActive, setIsAudioActive] = useState<boolean>(false);
+  const [isAudioActive, setIsAudioActive] = useState<boolean>(true);
   const [synthTab, setSynthTab] = useState<SynthTab>('drums');
   const [expandedVoice, setExpandedVoice] = useState<string | null>('tapePad');
   const [expandedArch, setExpandedArch] = useState<string | null>('audioReactive');
   const [songUrlInput, setSongUrlInput] = useState<string>(
-    'https://suno.com/s/lX9vCx1RSB4d9bOP'
+    DEFAULT_SYNTH_PARAMS.customAudioUrl ||
+      'https://ice1.somafm.com/synphaera-128-mp3'
   );
   const [showPresetLinks, setShowPresetLinks] = useState<boolean>(false);
   const [urlError, setUrlError] = useState<string | null>(null);
@@ -110,9 +113,11 @@ export const AudioSynthPanel: React.FC<AudioSynthPanelProps> = ({
   const scopeCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
-    engineRef.current = new ProceduralAudioEngine();
+    const engine = new ProceduralAudioEngine();
+    engineRef.current = engine;
+    void engine.start(DEFAULT_SYNTH_PARAMS);
     return () => {
-      engineRef.current?.destroy();
+      engine.destroy();
       engineRef.current = null;
     };
   }, []);
@@ -123,12 +128,29 @@ export const AudioSynthPanel: React.FC<AudioSynthPanelProps> = ({
 
   useEffect(() => {
     engineRef.current?.applyParams(params);
+    const activeBpm =
+      params.audioSource === 'procedural'
+        ? params.coreDrums.bpm
+        : telemetry.effectiveBpm ||
+          estimateSeedBpmFromTrack(
+            params.customAudioUrl,
+            params.customAudioTitle,
+            params.coreDrums.bpm
+          );
+    const bpmScale = params.audioReactive.bpmLinksDrive
+      ? computeBpmDriveScale(activeBpm)
+      : 1.0;
     audioBandsRef.current.musicDrivesTime = params.audioReactive.musicDrivesTime;
-    audioBandsRef.current.animDrive = params.audioReactive.animDrive;
+    audioBandsRef.current.bpm = activeBpm;
+    audioBandsRef.current.bpmLinksDrive = params.audioReactive.bpmLinksDrive;
+    audioBandsRef.current.animDrive = Math.min(
+      3.5,
+      Math.max(0.05, params.audioReactive.animDrive * bpmScale)
+    );
     audioBandsRef.current.reactivity = params.audioReactive.enabled
       ? params.audioReactive.reactivity
       : 0;
-  }, [params, audioBandsRef]);
+  }, [params, telemetry.effectiveBpm, audioBandsRef]);
 
   useEffect(() => {
     onAudioStateChange?.(isAudioActive, params.audioReactive.musicDrivesTime);
@@ -157,6 +179,8 @@ export const AudioSynthPanel: React.FC<AudioSynthPanelProps> = ({
         audioBandsRef.current.isPlaying = liveBands.isPlaying;
         audioBandsRef.current.musicDrivesTime = liveBands.musicDrivesTime;
         audioBandsRef.current.animDrive = liveBands.animDrive;
+        audioBandsRef.current.bpm = liveBands.bpm;
+        audioBandsRef.current.bpmLinksDrive = liveBands.bpmLinksDrive;
       } else {
         waveBytes.fill(128);
         audioBandsRef.current.sub = 0;
@@ -368,6 +392,10 @@ export const AudioSynthPanel: React.FC<AudioSynthPanelProps> = ({
 
   const handleResetSynth = () => {
     setUrlError(null);
+    setSongUrlInput(
+      DEFAULT_SYNTH_PARAMS.customAudioUrl ||
+        'https://ice1.somafm.com/synphaera-128-mp3'
+    );
     setParams(DEFAULT_SYNTH_PARAMS);
   };
 
@@ -428,7 +456,7 @@ export const AudioSynthPanel: React.FC<AudioSynthPanelProps> = ({
               </h2>
               <span className="text-[10px] font-mono text-amber-400 shrink-0">
                 {isCustomUrlMode
-                  ? 'SONG LINK'
+                  ? `LINK · ${telemetry.effectiveBpm || estimateSeedBpmFromTrack(params.customAudioUrl, params.customAudioTitle, params.coreDrums.bpm)} BPM`
                   : `${params.coreDrums.bpm} BPM`}
               </span>
             </div>
@@ -850,37 +878,116 @@ export const AudioSynthPanel: React.FC<AudioSynthPanelProps> = ({
               </div>
             </div>
 
-            {/* Music Controls Shader Animation Status & Velocity Bar */}
-            <div className="p-2.5 rounded-lg bg-neutral-950/80 border border-white/10 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={handleToggleMusicDrivesTime}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-colors cursor-pointer ${
-                    params.audioReactive.musicDrivesTime
-                      ? 'bg-amber-400/20 border-amber-400 text-amber-200'
-                      : 'bg-white/5 border-white/10 text-neutral-400 hover:text-white'
-                  }`}
-                >
-                  <Zap className="w-3 h-3 text-amber-400" />
-                  Music Drives Shader Animation:{' '}
-                  {params.audioReactive.musicDrivesTime ? 'ON' : 'OFF'}
-                </button>
-                <span className="text-[11px] font-mono text-amber-400 tabular-nums">
-                  {params.audioReactive.musicDrivesTime && !isAudioActive
-                    ? '0.00x (Waiting)'
-                    : `${shaderTimeScale.toFixed(2)}x Speed`}
-                </span>
-              </div>
-              <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-amber-400 via-cyan-400 to-emerald-400 transition-all duration-75"
-                  style={{
-                    width: `${Math.min(100, Math.round((shaderTimeScale / 2.6) * 100))}%`,
-                  }}
-                />
-              </div>
-            </div>
+            {/* Music Controls Shader Animation Status, BPM Link & Velocity Bar */}
+            {(() => {
+              const liveTuneBpm =
+                params.audioSource === 'procedural'
+                  ? params.coreDrums.bpm
+                  : telemetry.effectiveBpm ||
+                    estimateSeedBpmFromTrack(
+                      params.customAudioUrl,
+                      params.customAudioTitle,
+                      params.coreDrums.bpm
+                    );
+              const bpmScale = params.audioReactive.bpmLinksDrive
+                ? computeBpmDriveScale(liveTuneBpm)
+                : 1.0;
+              const effectiveDrive = Math.min(
+                3.5,
+                Math.max(0.05, params.audioReactive.animDrive * bpmScale)
+              );
+              return (
+                <div className="p-2.5 rounded-lg bg-neutral-950/80 border border-white/10 space-y-2">
+                  <div className="flex items-center justify-between gap-1.5">
+                    <button
+                      type="button"
+                      onClick={handleToggleMusicDrivesTime}
+                      className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-semibold border transition-colors cursor-pointer ${
+                        params.audioReactive.musicDrivesTime
+                          ? 'bg-amber-400/20 border-amber-400 text-amber-200'
+                          : 'bg-white/5 border-white/10 text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      <Zap className="w-3 h-3 text-amber-400" />
+                      Music Drives Shader:{' '}
+                      {params.audioReactive.musicDrivesTime ? 'ON' : 'OFF'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setParams((p) => ({
+                          ...p,
+                          audioReactive: {
+                            ...p.audioReactive,
+                            bpmLinksDrive: !p.audioReactive.bpmLinksDrive,
+                          },
+                        }))
+                      }
+                      title="Link Animation Speed Drive proportionally to the BPM of the currently playing tune (100 BPM = 1.00x)"
+                      className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-mono font-semibold border transition-colors cursor-pointer ${
+                        params.audioReactive.bpmLinksDrive
+                          ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
+                          : 'bg-white/5 border-white/10 text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      <span>
+                        BPM Link: {params.audioReactive.bpmLinksDrive ? `${liveTuneBpm}` : 'OFF'}
+                      </span>
+                    </button>
+                    <span className="text-[11px] font-mono text-amber-400 tabular-nums shrink-0">
+                      {params.audioReactive.musicDrivesTime && !isAudioActive
+                        ? '0.00x (Wait)'
+                        : `${shaderTimeScale.toFixed(2)}x`}
+                    </span>
+                  </div>
+
+                  {/* Quick Animation Speed Drive Slider with Live BPM Multiplier Readout */}
+                  <div className="space-y-1 pt-0.5">
+                    <div className="flex items-center justify-between text-[10px] font-mono">
+                      <span className="text-neutral-300">
+                        Animation Speed Drive{' '}
+                        {params.audioReactive.bpmLinksDrive && (
+                          <span className="text-emerald-400">
+                            (×{bpmScale.toFixed(2)} @ {liveTuneBpm} BPM)
+                          </span>
+                        )}
+                      </span>
+                      <span className="text-amber-400">
+                        {params.audioReactive.bpmLinksDrive
+                          ? `${params.audioReactive.animDrive.toFixed(2)}x → ${effectiveDrive.toFixed(2)}x`
+                          : `${params.audioReactive.animDrive.toFixed(2)}x`}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.1"
+                      max="2.5"
+                      step="0.05"
+                      value={params.audioReactive.animDrive}
+                      onChange={(e) =>
+                        setParams((p) => ({
+                          ...p,
+                          audioReactive: {
+                            ...p.audioReactive,
+                            animDrive: parseFloat(e.target.value),
+                          },
+                        }))
+                      }
+                      className="w-full hud-slider"
+                    />
+                  </div>
+
+                  <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-amber-400 via-cyan-400 to-emerald-400 transition-all duration-75"
+                      style={{
+                        width: `${Math.min(100, Math.round((shaderTimeScale / 2.6) * 100))}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Master Gain & Cursor Coupling */}
             <div className="grid grid-cols-2 gap-3 pt-1">
@@ -1630,6 +1737,58 @@ export const AudioSynthPanel: React.FC<AudioSynthPanelProps> = ({
                         {params.audioReactive.musicDrivesTime ? 'Music-Driven' : 'Free Clock'}
                       </button>
                     </div>
+
+                    {(() => {
+                      const liveTuneBpm =
+                        params.audioSource === 'procedural'
+                          ? params.coreDrums.bpm
+                          : telemetry.effectiveBpm ||
+                            estimateSeedBpmFromTrack(
+                              params.customAudioUrl,
+                              params.customAudioTitle,
+                              params.coreDrums.bpm
+                            );
+                      const bpmScale = params.audioReactive.bpmLinksDrive
+                        ? computeBpmDriveScale(liveTuneBpm)
+                        : 1.0;
+                      const effectiveDrive = Math.min(
+                        3.5,
+                        Math.max(0.05, params.audioReactive.animDrive * bpmScale)
+                      );
+                      return (
+                        <div className="flex items-center justify-between gap-2 p-2 rounded-md bg-neutral-950/70 border border-white/10">
+                          <div className="min-w-0">
+                            <div className="text-[11px] font-medium text-neutral-200">
+                              Link Animation Drive to Tune BPM
+                            </div>
+                            <div className="text-[10px] font-mono text-neutral-400 truncate">
+                              {params.audioReactive.bpmLinksDrive
+                                ? `${liveTuneBpm} BPM (${bpmScale.toFixed(2)}×) → ${effectiveDrive.toFixed(2)}x Effective Drive`
+                                : 'Manual Drive (Fixed unscaled speed)'}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setParams((p) => ({
+                                ...p,
+                                audioReactive: {
+                                  ...p.audioReactive,
+                                  bpmLinksDrive: !p.audioReactive.bpmLinksDrive,
+                                },
+                              }))
+                            }
+                            className={`px-2.5 py-1 rounded text-[11px] font-semibold border transition-colors shrink-0 cursor-pointer ${
+                              params.audioReactive.bpmLinksDrive
+                                ? 'bg-emerald-400 border-emerald-300 text-neutral-950'
+                                : 'bg-white/5 border-white/10 text-neutral-300 hover:text-white'
+                            }`}
+                          >
+                            {params.audioReactive.bpmLinksDrive ? 'BPM Linked' : 'Unlinked'}
+                          </button>
+                        </div>
+                      );
+                    })()}
 
                     <div className="grid grid-cols-2 gap-2.5">
                       <div className="space-y-1">
