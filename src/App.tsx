@@ -119,6 +119,7 @@ export default function App() {
   const [presetTransition, setPresetTransition] =
     useState<PresetTransitionRequest | null>(null);
   const [transitionProgress, setTransitionProgress] = useState<number | null>(null);
+  const [autoCyclePresets, setAutoCyclePresets] = useState<boolean>(false);
 
   const [metrics, setMetrics] = useState<CursorMetrics>({
     x: 0.0,
@@ -538,8 +539,61 @@ export default function App() {
     [activePresetId, filteredPresets, handleSelectPreset]
   );
 
+  // VJ Autopilot: automatically crossfade to the next preset every 16 seconds when enabled
+  useEffect(() => {
+    if (!autoCyclePresets || isPaused) return;
+    const timer = window.setInterval(() => {
+      handleStepPreset(1);
+    }, 16000);
+    return () => window.clearInterval(timer);
+  }, [autoCyclePresets, isPaused, handleStepPreset]);
+
+  const isPs2ModeActive =
+    (state.trailPersistence ?? 0) > 0.35 ||
+    (state.ps2ColorMatrix ?? 0) > 0.35 ||
+    (state.layers.ps2bios?.mix ?? 0) > 0.1 ||
+    (state.layers.ps2vlm?.mix ?? 0) > 0.1;
+
+  const handleTogglePs2Visualizer = useCallback(() => {
+    const ps2Presets = SHADER_PRESETS.filter((p) => p.category === 'ps2-visualizer');
+    if (isPs2ModeActive) {
+      // Cycle to the next PS2 Visualizer preset if already in PS2 mode
+      const currentIdx = ps2Presets.findIndex((p) => p.id === activePresetId);
+      const nextPreset =
+        ps2Presets[(currentIdx + 1) % Math.max(1, ps2Presets.length)] ||
+        SHADER_PRESETS[0];
+      setAutoOrbit(true);
+      handleSelectPreset(nextPreset);
+    } else {
+      // Launch flagship PS2 System BIOS: Crystal Towers & 7 Orbs preset + Auto-Orbit
+      const flagship = ps2Presets[0] || SHADER_PRESETS[0];
+      setAutoOrbit(true);
+      setPresetCategory('ps2-visualizer');
+      handleSelectPreset(flagship);
+      if (musicDrivesTime && !isAudioPlaying) {
+        void toggleAudioRef.current?.();
+      }
+    }
+  }, [
+    activePresetId,
+    handleSelectPreset,
+    isAudioPlaying,
+    isPs2ModeActive,
+    musicDrivesTime,
+  ]);
+
+  const handleDisablePs2Fx = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      trailPersistence: 0.0,
+      crtScanlines: 0.0,
+      ps2ColorMatrix: 0.0,
+    }));
+  }, []);
+
   const handleReset = () => {
     setIsAnimatingSliders(false);
+    setAutoCyclePresets(false);
     setAutoOrbit(false);
     setIsPaused(false);
     setState((prev) => {
@@ -1126,8 +1180,21 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Persistent Global Slider Animator Action Bar */}
-                <div className="flex items-center gap-2">
+                {/* Persistent Global Slider Animator + PS2 Visualizer Mode Action Bar */}
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleTogglePs2Visualizer}
+                    title="Launch or cycle PlayStation 2 (PS2) BIOS Towers & VLM Waveform Visualizer Mode with Temporal Motion Trails"
+                    className={`flex-1 inline-flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                      isPs2ModeActive
+                        ? 'bg-indigo-500/35 border-cyan-400 text-cyan-200 hover:bg-indigo-500/45'
+                        : 'bg-indigo-950/60 border-indigo-400/40 text-indigo-200 hover:bg-indigo-900/60 hover:border-cyan-400/60'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                    {isPs2ModeActive ? 'Next PS2 VLM Mode' : 'PS2 Visualizer Mode'}
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -1137,7 +1204,7 @@ export default function App() {
                         void toggleAudioRef.current?.();
                       }
                     }}
-                    className={`flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                       isAnimatingSliders
                         ? 'bg-amber-400 border-amber-300 text-neutral-950'
                         : 'bg-white/5 border-white/15 text-white hover:bg-white/10'
@@ -1145,17 +1212,16 @@ export default function App() {
                   >
                     <Activity className="w-3.5 h-3.5" />
                     {isAnimatingSliders
-                      ? `Stop Animating (${activeOrderedLayers.length} Active)`
-                      : `Animate Active Sliders (${activeOrderedLayers.length})`}
+                      ? `Stop LFO (${activeOrderedLayers.length})`
+                      : `LFO (${activeOrderedLayers.length})`}
                   </button>
                   <button
                     type="button"
                     onClick={handleReset}
                     title="Reset all sliders to defaults"
-                    className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-white/5 border border-white/10 text-neutral-300 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                    className="inline-flex items-center justify-center gap-1 px-2.5 py-2 rounded-lg text-xs font-medium bg-white/5 border border-white/10 text-neutral-300 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
-                    Reset
                   </button>
                 </div>
               </div>
@@ -1353,6 +1419,137 @@ export default function App() {
                             onChange={(e) =>
                               updateCoreParam(
                                 'negativeSpaceThreshold',
+                                parseFloat(e.target.value)
+                              )
+                            }
+                            className="w-full hud-slider"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* PS2 VLM Temporal Feedback & Trinitron Post-FX Deck */}
+                    <div className="p-3 rounded-lg bg-indigo-950/35 border border-indigo-400/30 space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold text-cyan-300">
+                          PS2 VLM Motion Trails & Trinitron FX
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={handleTogglePs2Visualizer}
+                            className="px-2 py-0.5 rounded bg-cyan-500/20 border border-cyan-400/50 text-[10px] font-semibold text-cyan-200 hover:bg-cyan-500/30 transition-colors cursor-pointer"
+                          >
+                            Load PS2 Preset
+                          </button>
+                          {((state.trailPersistence ?? 0) > 0.01 ||
+                            (state.crtScanlines ?? 0) > 0.01 ||
+                            (state.ps2ColorMatrix ?? 0) > 0.01) && (
+                            <button
+                              type="button"
+                              onClick={handleDisablePs2Fx}
+                              className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] font-medium text-neutral-300 hover:text-white transition-colors cursor-pointer"
+                            >
+                              Clear FX
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-[11px] text-neutral-300">
+                            <span title="PS2 VLM frame-buffer ping-pong persistence creating glowing liquid motion trails">
+                              Trail Persistence
+                            </span>
+                            <span className="font-mono tabular-nums text-cyan-300">
+                              {Math.round((state.trailPersistence ?? 0) * 100)}%
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0.0"
+                            max="0.92"
+                            step="0.02"
+                            value={state.trailPersistence ?? 0.0}
+                            onChange={(e) =>
+                              updateCoreParam(
+                                'trailPersistence',
+                                parseFloat(e.target.value)
+                              )
+                            }
+                            className="w-full hud-slider"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-[11px] text-neutral-300">
+                            <span title="Radial zoom smear per feedback frame (positive = outward rush, negative = inward vortex)">
+                              Trail Zoom Smear
+                            </span>
+                            <span className="font-mono tabular-nums text-cyan-300">
+                              {((state.trailZoomWarp ?? 0.009) * 100).toFixed(1)}%
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min="-0.025"
+                            max="0.025"
+                            step="0.001"
+                            value={state.trailZoomWarp ?? 0.009}
+                            onChange={(e) =>
+                              updateCoreParam(
+                                'trailZoomWarp',
+                                parseFloat(e.target.value)
+                              )
+                            }
+                            className="w-full hud-slider"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-[11px] text-neutral-300">
+                            <span title="Y2K Sony PlayStation 2 BIOS deep cobalt, sapphire, and electric cyan color grade">
+                              PS2 Cobalt Grade
+                            </span>
+                            <span className="font-mono tabular-nums text-indigo-300">
+                              {Math.round((state.ps2ColorMatrix ?? 0) * 100)}%
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0.0"
+                            max="1.0"
+                            step="0.02"
+                            value={state.ps2ColorMatrix ?? 0.0}
+                            onChange={(e) =>
+                              updateCoreParam(
+                                'ps2ColorMatrix',
+                                parseFloat(e.target.value)
+                              )
+                            }
+                            className="w-full hud-slider"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-[11px] text-neutral-300">
+                            <span title="Sony Trinitron CRT aperture grille RGB phosphor mask & scanline bloom">
+                              Trinitron CRT
+                            </span>
+                            <span className="font-mono tabular-nums text-amber-400">
+                              {Math.round((state.crtScanlines ?? 0) * 100)}%
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0.0"
+                            max="1.0"
+                            step="0.02"
+                            value={state.crtScanlines ?? 0.0}
+                            onChange={(e) =>
+                              updateCoreParam(
+                                'crtScanlines',
                                 parseFloat(e.target.value)
                               )
                             }
@@ -1672,11 +1869,25 @@ export default function App() {
                         <span className="font-semibold text-amber-300">
                           Preset Crossfade Transition
                         </span>
-                        <span className="font-mono tabular-nums text-amber-400">
-                          {presetFadeDuration <= 0.01
-                            ? 'Instant (0.0s)'
-                            : `${presetFadeDuration.toFixed(1)}s Dissolve`}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setAutoCyclePresets((prev) => !prev)}
+                            title="Automatically crossfade to the next preset every 16 seconds like the PS2 Audio Visualizer"
+                            className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-colors cursor-pointer ${
+                              autoCyclePresets
+                                ? 'bg-cyan-400 text-neutral-950 border-cyan-300'
+                                : 'bg-white/5 border-white/15 text-cyan-300 hover:bg-white/10'
+                            }`}
+                          >
+                            {autoCyclePresets ? 'VJ Auto-Cycle: ON' : 'VJ Auto-Cycle'}
+                          </button>
+                          <span className="font-mono tabular-nums text-amber-400">
+                            {presetFadeDuration <= 0.01
+                              ? 'Instant (0.0s)'
+                              : `${presetFadeDuration.toFixed(1)}s Dissolve`}
+                          </span>
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-2">
@@ -1744,8 +1955,8 @@ export default function App() {
                           Live Preset Mechanics Mutator
                         </span>
                         <span className="font-mono text-neutral-400">
-                          Fill {Math.round(state.negativeSpaceFill * 100)}% · Gate{' '}
-                          {state.negativeSpaceThreshold.toFixed(2)}
+                          Trails {Math.round((state.trailPersistence ?? 0) * 100)}% · Fill{' '}
+                          {Math.round(state.negativeSpaceFill * 100)}%
                         </span>
                       </div>
                       <div className="grid grid-cols-3 gap-1.5">
@@ -1793,6 +2004,7 @@ export default function App() {
                       {(
                         [
                           { id: 'all', label: `All (${SHADER_PRESETS.length})` },
+                          { id: 'ps2-visualizer', label: 'PS2 Visualizer (4)' },
                           { id: 'new-layers', label: 'New Shaders' },
                           { id: 'fractal-cascades', label: '400-Iter & Fractals' },
                           { id: 'order-inversions', label: 'Order Inversions' },

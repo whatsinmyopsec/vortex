@@ -2519,7 +2519,353 @@ vec3 evalKlein4dLattice(vec2 coord) {
 };
 
 /**
- * Master Modular Shader Layer Registry (Ordered 01 through 26, unmasked full-viewport layers).
+ * 27. PS2 BIOS Crystal Towers & 7-Orb Nebula
+ * Recreates the iconic Sony PlayStation 2 System BIOS monolithic crystal towers rising out of
+ * deep cobalt-indigo abyssal fog, crowned by the 7 orbiting cyan constellation light orbs with comet trails.
+ */
+export const ps2BiosLayer: ShaderLayerDefinition = {
+  id: 'ps2bios',
+  name: '27. PS2 BIOS Crystal Towers & 7-Orb Nebula',
+  shortName: 'PS2 Towers',
+  description:
+    'Iconic PlayStation 2 System BIOS 3D translucent cobalt-indigo monolithic crystal towers pulsing to audio frequencies beneath the 7 orbiting cyan constellation orbs and comet trails.',
+  mixUniform: 'uMixPs2Bios',
+  defaultMix: 0.0,
+  lfoMix: { freq: 0.21, phase: 2.4, min: 0.35, max: 0.98, decimals: 2 },
+  subParams: [
+    {
+      key: 'density',
+      uniformName: 'uPs2TowerDensity',
+      label: 'Tower Matrix Grid',
+      min: 3.0,
+      max: 10.0,
+      step: 0.5,
+      defaultValue: 5.5,
+      format: (v) => `${v.toFixed(1)}x`,
+      lfo: { freq: 0.14, phase: 0.5, min: 4.0, max: 8.0, decimals: 1 },
+    },
+    {
+      key: 'orbGlow',
+      uniformName: 'uPs2OrbGlow',
+      label: '7-Orb Comet Radiance',
+      min: 0.4,
+      max: 2.5,
+      step: 0.05,
+      defaultValue: 1.35,
+      format: (v) => v.toFixed(2),
+      lfo: { freq: 0.28, phase: 1.7, min: 0.85, max: 2.1, decimals: 2 },
+    },
+    {
+      key: 'fogDepth',
+      uniformName: 'uPs2FogDepth',
+      label: 'Cobalt Abyssal Fog',
+      min: 0.3,
+      max: 2.0,
+      step: 0.05,
+      defaultValue: 1.15,
+      format: (v) => v.toFixed(2),
+      lfo: { freq: 0.18, phase: 3.1, min: 0.65, max: 1.65, decimals: 2 },
+    },
+  ],
+  glslFunction: `
+vec3 evalPs2BiosTowers(vec2 coord, float gridScale, float orbGlow, float fogAmount) {
+    float bass = clamp(uAudioSub * uAudioReactivity, 0.0, 2.0);
+    float mid  = clamp(uAudioMid * uAudioReactivity, 0.0, 2.0);
+    float high = clamp(uAudioHigh * uAudioReactivity, 0.0, 2.0);
+
+    // Camera drift looking obliquely into the PS2 monolith matrix
+    float camT = iTime * 0.32;
+    vec2 camDrift = vec2(sin(camT * 0.7) * 0.45, camT * 0.85);
+    vec3 col = vec3(0.0);
+
+    // Deep Y2K Sony PS2 BIOS cobalt-indigo volumetric nebula backdrop
+    float neb = fbm(coord * 2.2 + vec2(camT * 0.18, -camT * 0.14));
+    float neb2 = fbm(coord * 4.5 - vec2(camT * 0.25, camT * 0.22) + neb * 0.6);
+    float rDist = length(coord);
+    vec3 abyssCol = mix(vec3(0.008, 0.028, 0.11), vec3(0.035, 0.16, 0.52), smoothstep(0.15, 0.85, neb * neb2 * 1.8));
+    col += abyssCol * fogAmount * exp(-rDist * 0.85);
+
+    // Multi-plane 3D perspective monolithic crystal tower extrusion (6 depth slices)
+    for (int slice = 0; slice < 6; slice++) {
+        float fi = float(slice);
+        float zDepth = 1.0 + fi * 0.42 - fract(camT * 0.35) * 0.42;
+        float persp = 1.0 / max(zDepth, 0.25);
+
+        // Project 2D coord with parallax offset per depth layer
+        vec2 planeUv = coord * (gridScale * zDepth * 0.55) + camDrift * (0.6 + fi * 0.12);
+        vec2 cellId = floor(planeUv);
+        vec2 cellF = fract(planeUv) - 0.5;
+
+        float hSeed = hash21(cellId + fi * 13.7);
+        // Only ~62% of slots hold a memory-card tower (authentic sparse PS2 BIOS layout)
+        if (hSeed > 0.38) {
+            float freqPhase = hSeed * 6.2831 + iTime * (1.2 + hSeed * 1.4);
+            float audioLift = bass * 0.45 * sin(hSeed * 12.0 + iTime * 2.5) + mid * 0.35;
+            float towerPulse = 0.55 + 0.45 * sin(freqPhase) + audioLift;
+
+            // Monolith square cross-section with crystal bevels
+            float halfW = mix(0.24, 0.36, fract(hSeed * 7.13));
+            vec2 dBox = abs(cellF) - vec2(halfW);
+            float boxDist = max(dBox.x, dBox.y);
+
+            // Glowing crystal edges + translucent inner glass face
+            float edgeGlow = exp(-abs(boxDist) * 28.0) * (0.65 + 0.45 * towerPulse);
+            float innerFace = smoothstep(0.02, -0.04, boxDist) * (0.22 + 0.18 * towerPulse);
+            // Internal diagonal crystal refraction rib
+            float crystalRib = exp(-abs(cellF.x + cellF.y) * 18.0) * smoothstep(0.0, -0.02, boxDist) * 0.35;
+
+            float depthFade = exp(-zDepth * 0.52) * smoothstep(0.05, 0.35, zDepth);
+            vec3 towerTint = mix(
+                vec3(0.08, 0.32, 0.92),
+                vec3(0.28, 0.78, 1.0),
+                0.5 + 0.5 * sin(hSeed * 9.0 + fi * 0.7 + high * 0.8)
+            );
+            // Subtle violet-indigo rim on deep towers
+            towerTint = mix(towerTint, vec3(0.42, 0.22, 0.98), clamp((zDepth - 1.2) * 0.35, 0.0, 0.65));
+
+            col += towerTint * (edgeGlow + innerFace + crystalRib) * depthFade * (0.85 + bass * 0.3);
+        }
+    }
+
+    // Iconic 7 Orbiting PS2 Constellation Light Orbs + Harmonic Comet Trails
+    float orbSpeed = iTime * (0.95 + mid * 0.15);
+    for (int i = 0; i < 7; i++) {
+        float idx = float(i);
+        float baseAngle = idx * 0.8975979 + orbSpeed * (0.75 + 0.08 * idx);
+        float rad = 0.22 + 0.14 * sin(orbSpeed * 0.62 + idx * 1.35) + bass * 0.04;
+
+        // Sample 5 trail segments behind each orb for silky PS2 BIOS light ribbons
+        for (int tStep = 0; tStep < 5; tStep++) {
+            float lag = float(tStep) * 0.085;
+            float aLag = baseAngle - lag * (1.2 + 0.1 * idx);
+            float rLag = rad + 0.03 * sin((orbSpeed - lag) * 1.4 + idx);
+            // Figure-8 / 3D tilted orbital projection
+            vec2 orbPos = vec2(
+                cos(aLag) * rLag + 0.08 * sin(aLag * 2.0 + idx),
+                sin(aLag * 1.5) * rLag * 0.72 + 0.06 * cos(aLag - idx)
+            );
+
+            float dOrb = length(coord - orbPos);
+            float trailWeight = exp(-float(tStep) * 0.58);
+            float core = (0.0028 / (dOrb * dOrb + 0.00055)) * trailWeight;
+            float halo = exp(-dOrb * 11.0) * 0.28 * trailWeight;
+
+            vec3 orbCol = mix(
+                vec3(0.22, 0.75, 1.0),
+                vec3(0.65, 0.92, 1.0),
+                float(tStep == 0)
+            );
+            col += orbCol * (core + halo) * orbGlow * (0.85 + high * 0.35);
+        }
+    }
+
+    return clamp(col, 0.0, 3.0);
+}
+`,
+  glslEvalExpr:
+    'evalPs2BiosTowers(domainCoord, uPs2TowerDensity, uPs2OrbGlow, uPs2FogDepth)',
+  shadertoyHelper: (v) => {
+    const dens = (v.density ?? 5.5).toFixed(1);
+    const og = (v.orbGlow ?? 1.35).toFixed(2);
+    const fd = (v.fogDepth ?? 1.15).toFixed(2);
+    return `// Layer 27: PS2 BIOS Crystal Towers & 7-Orb Nebula
+vec3 evalPs2BiosTowers(vec2 coord) {
+    float camT = iTime * 0.32;
+    vec2 camDrift = vec2(sin(camT * 0.7) * 0.45, camT * 0.85);
+    float neb = fbm(coord * 2.2 + vec2(camT * 0.18, -camT * 0.14));
+    vec3 col = mix(vec3(0.008, 0.028, 0.11), vec3(0.035, 0.16, 0.52), neb) * ${fd} * exp(-length(coord) * 0.85);
+    for (int slice = 0; slice < 6; slice++) {
+        float fi = float(slice);
+        float zDepth = 1.0 + fi * 0.42 - fract(camT * 0.35) * 0.42;
+        vec2 planeUv = coord * (${dens} * zDepth * 0.55) + camDrift * (0.6 + fi * 0.12);
+        vec2 cellId = floor(planeUv), cellF = fract(planeUv) - 0.5;
+        float hSeed = hash21(cellId + fi * 13.7);
+        if (hSeed > 0.38) {
+            float halfW = mix(0.24, 0.36, fract(hSeed * 7.13));
+            vec2 dBox = abs(cellF) - vec2(halfW);
+            float boxDist = max(dBox.x, dBox.y);
+            float edgeGlow = exp(-abs(boxDist) * 28.0);
+            float innerFace = smoothstep(0.02, -0.04, boxDist) * 0.25;
+            col += mix(vec3(0.08, 0.32, 0.92), vec3(0.28, 0.78, 1.0), 0.5 + 0.5 * sin(hSeed * 9.0)) * (edgeGlow + innerFace) * exp(-zDepth * 0.52);
+        }
+    }
+    for (int i = 0; i < 7; i++) {
+        float idx = float(i), aLag = idx * 0.8975979 + iTime * (0.75 + 0.08 * idx), rLag = 0.24 + 0.12 * sin(iTime * 0.6 + idx);
+        vec2 orbPos = vec2(cos(aLag) * rLag, sin(aLag * 1.5) * rLag * 0.72);
+        float dOrb = length(coord - orbPos);
+        col += vec3(0.35, 0.85, 1.0) * (0.004 / (dOrb * dOrb + 0.0006)) * ${og};
+    }
+    return clamp(col, 0.0, 3.0);
+}`;
+  },
+  shadertoyMain: (mix) =>
+    `    // Layer 27: PS2 BIOS Crystal Towers & 7-Orb Nebula
+    col += evalPs2BiosTowers(domainCoord) * ${mix.toFixed(2)};`,
+};
+
+/**
+ * 28. PS2 VLM Waveform Ribbon & Spectrum Horizon
+ * Inspired by the PlayStation 2 CD Audio Player / Jeff Minter Virtual Light Machine (VLM):
+ * 3D neon oscilloscope waveform ribbons, mirrored radial spectrum analyzer bars, and pulsing vector horizon.
+ */
+export const ps2VlmLayer: ShaderLayerDefinition = {
+  id: 'ps2vlm',
+  name: '28. PS2 VLM Waveform Ribbon & Spectrum Horizon',
+  shortName: 'PS2 VLM Wave',
+  description:
+    'PlayStation 2 CD Audio Player / Virtual Light Machine (VLM) 3D glowing waveform oscilloscope ribbons and mirrored frequency spectrum analyzer bars reactive to sub-bass, mids, and highs.',
+  mixUniform: 'uMixPs2Vlm',
+  defaultMix: 0.0,
+  lfoMix: { freq: 0.25, phase: 0.9, min: 0.35, max: 0.98, decimals: 2 },
+  subParams: [
+    {
+      key: 'waveAmp',
+      uniformName: 'uPs2WaveAmp',
+      label: 'Waveform Excursion',
+      min: 0.3,
+      max: 2.5,
+      step: 0.05,
+      defaultValue: 1.25,
+      format: (v) => `${v.toFixed(2)}x`,
+      lfo: { freq: 0.24, phase: 0.4, min: 0.75, max: 2.1, decimals: 2 },
+    },
+    {
+      key: 'bandCount',
+      uniformName: 'uPs2BandCount',
+      label: 'Spectrum EQ Bands',
+      min: 8.0,
+      max: 48.0,
+      step: 2.0,
+      defaultValue: 24.0,
+      format: (v) => `${Math.round(v)} bands`,
+      lfo: { freq: 0.12, phase: 1.9, min: 16.0, max: 36.0, decimals: 0 },
+    },
+    {
+      key: 'ribbonGlow',
+      uniformName: 'uPs2RibbonGlow',
+      label: 'VLM Phosphor Bloom',
+      min: 0.5,
+      max: 2.5,
+      step: 0.05,
+      defaultValue: 1.4,
+      format: (v) => v.toFixed(2),
+      lfo: { freq: 0.29, phase: 2.6, min: 0.9, max: 2.2, decimals: 2 },
+    },
+  ],
+  glslFunction: `
+vec3 evalPs2VlmVisualizer(vec2 coord, float r, float a, float waveAmp, float bandCount, float ribbonGlow) {
+    float bass = clamp(uAudioSub * uAudioReactivity, 0.0, 2.2);
+    float mid  = clamp(uAudioMid * uAudioReactivity, 0.0, 2.2);
+    float high = clamp(uAudioHigh * uAudioReactivity, 0.0, 2.2);
+    float energy = 0.35 + bass * 0.45 + mid * 0.35 + high * 0.25;
+
+    vec3 col = vec3(0.0);
+    float t = iTime * 1.65;
+
+    // 1. Five 3D Perspective Oscilloscope Waveform Ribbons (PS2 CD Player signature)
+    for (int w = 0; w < 5; w++) {
+        float fw = float(w);
+        float zPersp = 1.0 - fw * 0.13;
+        vec2 wUv = coord / max(zPersp, 0.35);
+
+        float freq1 = 3.5 + fw * 1.4;
+        float freq2 = 8.0 + fw * 2.3;
+        float freq3 = 17.0 + fw * 3.1;
+
+        float waveSignal =
+            sin(wUv.x * freq1 + t * (1.1 + fw * 0.18)) * (0.14 + bass * 0.16) +
+            cos(wUv.x * freq2 - t * (1.7 - fw * 0.12)) * (0.07 + mid * 0.11) +
+            sin(wUv.x * freq3 + t * 2.9 + fw) * (0.03 + high * 0.065);
+
+        float targetY = waveSignal * waveAmp + (fw - 2.0) * 0.055 * (0.6 + bass * 0.4);
+        float dRibbon = abs(wUv.y - targetY);
+
+        float coreLine = 0.0026 / (dRibbon + 0.0018);
+        float wideSheen = exp(-dRibbon * 14.0) * 0.42;
+
+        // Y2K PS2 palette cycling from electric cyan -> sapphire -> neon violet -> magenta
+        vec3 ribCol = 0.55 + 0.45 * cos(vec3(0.0, 1.8, 3.4) + fw * 0.65 + wUv.x * 1.8 - iTime * 0.7);
+        ribCol = mix(ribCol, vec3(0.18, 0.72, 1.0), 0.42);
+
+        col += ribCol * (coreLine + wideSheen) * zPersp * ribbonGlow * (0.75 + energy * 0.35);
+    }
+
+    // 2. Mirrored Radial & Horizon Spectrum Analyzer Bars with Peak-Hold Caps
+    float bands = max(8.0, floor(bandCount));
+    float angleNorm = fract((a + 3.14159265) / 6.2831853);
+    float bandIdx = floor(angleNorm * bands);
+    float bandLocal = fract(angleNorm * bands) - 0.5;
+
+    // Synthesize per-band FFT energy from real sub/mid/high envelopes + harmonic distribution
+    float bandRatio = abs(bandIdx / bands - 0.5) * 2.0; // 0 = bass center, 1 = high outer
+    float bandSeed = hash21(vec2(bandIdx, floor(iTime * 0.25)));
+    float synthFft =
+        mix(bass * 0.85, high * 0.85, bandRatio) +
+        mid * 0.55 * sin(bandIdx * 0.85 + iTime * 4.2) * sin(bandIdx * 0.45 - iTime * 2.7) +
+        0.18 * (0.5 + 0.5 * sin(bandIdx * 1.3 + iTime * 3.1 + bandSeed * 6.28));
+    float barHeight = clamp(0.12 + abs(synthFft) * 0.36 * waveAmp, 0.08, 0.78);
+
+    // Radial ring equalizer around the vortex core
+    float innerRing = 0.16 + bass * 0.03;
+    float outerRing = innerRing + barHeight;
+    float barMask = smoothstep(0.38, 0.24, abs(bandLocal)) *
+                    smoothstep(innerRing - 0.01, innerRing + 0.01, r) *
+                    smoothstep(outerRing + 0.012, outerRing - 0.012, r);
+
+    // Segmented LED step quantization along radius
+    float ledSeg = smoothstep(-0.2, 0.35, sin(r * 95.0));
+    // Glowing peak-hold cap just outside outerRing
+    float peakPos = outerRing + 0.022 + 0.015 * (0.5 + 0.5 * sin(iTime * 2.2 + bandIdx));
+    float peakCap = smoothstep(0.38, 0.22, abs(bandLocal)) * exp(-abs(r - peakPos) * 85.0);
+
+    vec3 eqCol = mix(
+        vec3(0.08, 0.48, 1.0),
+        vec3(0.35, 0.95, 1.0),
+        clamp((r - innerRing) / max(barHeight, 0.05), 0.0, 1.0)
+    );
+    vec3 capCol = vec3(0.85, 0.96, 1.0);
+
+    col += eqCol * barMask * (0.45 + 0.55 * ledSeg) * ribbonGlow * 0.85;
+    col += capCol * peakCap * ribbonGlow * (0.9 + high * 0.5);
+
+    return clamp(col, 0.0, 3.0);
+}
+`,
+  glslEvalExpr:
+    'evalPs2VlmVisualizer(domainCoord, r, a, uPs2WaveAmp, uPs2BandCount, uPs2RibbonGlow)',
+  shadertoyHelper: (v) => {
+    const wa = (v.waveAmp ?? 1.25).toFixed(2);
+    const bc = (v.bandCount ?? 24.0).toFixed(1);
+    const rg = (v.ribbonGlow ?? 1.4).toFixed(2);
+    return `// Layer 28: PS2 VLM Waveform Ribbon & Spectrum Horizon
+vec3 evalPs2VlmVisualizer(vec2 coord, float r, float a) {
+    vec3 col = vec3(0.0);
+    float t = iTime * 1.65;
+    for (int w = 0; w < 5; w++) {
+        float fw = float(w), zPersp = 1.0 - fw * 0.13;
+        vec2 wUv = coord / max(zPersp, 0.35);
+        float waveSignal = sin(wUv.x * (3.5 + fw * 1.4) + t * (1.1 + fw * 0.18)) * 0.18 + cos(wUv.x * (8.0 + fw * 2.3) - t * 1.5) * 0.09;
+        float dRibbon = abs(wUv.y - waveSignal * ${wa} - (fw - 2.0) * 0.055);
+        vec3 ribCol = mix(0.55 + 0.45 * cos(vec3(0.0, 1.8, 3.4) + fw * 0.65 + wUv.x * 1.8 - iTime * 0.7), vec3(0.18, 0.72, 1.0), 0.42);
+        col += ribCol * (0.0026 / (dRibbon + 0.0018) + exp(-dRibbon * 14.0) * 0.42) * zPersp * ${rg};
+    }
+    float bands = ${bc};
+    float angleNorm = fract((a + 3.14159265) / 6.2831853);
+    float bandIdx = floor(angleNorm * bands), bandLocal = fract(angleNorm * bands) - 0.5;
+    float barHeight = 0.16 + 0.22 * (0.5 + 0.5 * sin(bandIdx * 0.9 + iTime * 3.8));
+    float innerRing = 0.17, outerRing = innerRing + barHeight;
+    float barMask = smoothstep(0.38, 0.24, abs(bandLocal)) * smoothstep(innerRing - 0.01, innerRing + 0.01, r) * smoothstep(outerRing + 0.012, outerRing - 0.012, r);
+    col += vec3(0.18, 0.72, 1.0) * barMask * ${rg} * 0.75;
+    return clamp(col, 0.0, 3.0);
+}`;
+  },
+  shadertoyMain: (mix) =>
+    `    // Layer 28: PS2 VLM Waveform Ribbon & Spectrum Horizon
+    col += evalPs2VlmVisualizer(domainCoord, r, a) * ${mix.toFixed(2)};`,
+};
+
+/**
+ * Master Modular Shader Layer Registry (Ordered 01 through 28, unmasked full-viewport layers).
  */
 export const SHADER_LAYERS: ShaderLayerDefinition[] = [
   polarTunnelLayer,       // 01. Polar Harmonic Tunnel
@@ -2548,6 +2894,9 @@ export const SHADER_LAYERS: ShaderLayerDefinition[] = [
   kifsCrystalLayer,       // 24. Kaleidoscopic IFS Crystal
   logSpiralVortexLayer,   // 25. Logarithmic Spiral Vortex
   klein4dLayer,           // 26. 4D Kleinian Inversion Lattice
+  ps2BiosLayer,           // 27. PS2 BIOS Crystal Towers & 7-Orb Nebula
+  ps2VlmLayer,            // 28. PS2 VLM Waveform Ribbon & Spectrum Horizon
 ];
+
 
 

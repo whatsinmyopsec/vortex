@@ -70,6 +70,8 @@ const SPATIAL_GRID_UNIFORMS = new Set<string>([
   'uLogSpiralArms',
   'uLogSpiralFreq',
   'uKlein4dScale',
+  'uPs2TowerDensity',
+  'uPs2BandCount',
 ]);
 
 export interface PresetTransitionRequest {
@@ -88,6 +90,57 @@ void main() {
   vec2 uv = gl_FragCoord.xy / max(iResolution.xy, vec2(1.0));
   vec4 colFrom = texture2D(uTexFrom, uv);
   gl_FragColor = vec4(colFrom.rgb, clamp(uOpacity, 0.0, 1.0));
+}
+`;
+
+/**
+ * PlayStation 2 Virtual Light Machine (VLM) Temporal Feedback & Zoom-Smear Shader
+ * Accumulates previous frames with radial zoom/rotation warp and slight chromatic trail dispersion.
+ */
+const PS2_FEEDBACK_FRAGMENT_SHADER_SOURCE = `
+precision highp float;
+uniform sampler2D uTexCurrent;
+uniform sampler2D uTexHistory;
+uniform vec2 iResolution;
+uniform float uPersistence;
+uniform float uZoomWarp;
+uniform float uRotWarp;
+uniform vec2 uCenterOffset;
+
+void main() {
+  vec2 res = max(iResolution.xy, vec2(1.0));
+  vec2 uv = gl_FragCoord.xy / res;
+  vec2 aspect = vec2(res.x / res.y, 1.0);
+
+  vec2 center = vec2(0.5) + uCenterOffset * vec2(res.y / res.x, 1.0) * 0.35;
+  vec2 d = (uv - center) * aspect;
+
+  // Radial zoom + subtle angular rotation warp for liquid PS2 VLM trails
+  float zoom = 1.0 - uZoomWarp;
+  float c = cos(uRotWarp);
+  float s = sin(uRotWarp);
+  vec2 dWarped = mat2(c, -s, s, c) * (d * zoom);
+  vec2 uvHist = center + dWarped / aspect;
+
+  // Subtle chromatic dispersion along the radial feedback vector
+  vec2 chromaStep = (uv - center) * (uZoomWarp * 0.32);
+  vec3 curr = texture2D(uTexCurrent, uv).rgb;
+
+  vec3 hist = vec3(0.0);
+  if (uvHist.x >= 0.0 && uvHist.x <= 1.0 && uvHist.y >= 0.0 && uvHist.y <= 1.0) {
+    float hR = texture2D(uTexHistory, clamp(uvHist + chromaStep, 0.0, 1.0)).r;
+    float hG = texture2D(uTexHistory, clamp(uvHist, 0.0, 1.0)).g;
+    float hB = texture2D(uTexHistory, clamp(uvHist - chromaStep, 0.0, 1.0)).b;
+    hist = vec3(hR, hG, hB) * vec3(0.96, 0.985, 1.015);
+  }
+
+  float p = clamp(uPersistence, 0.0, 0.94);
+  // Hybrid optical screen + energy-conserving leaky integrator so trails glow without whiteout
+  vec3 opticalMax = max(curr, hist * p);
+  vec3 energyMix = curr * (1.0 - p * 0.58) + hist * p * 0.86;
+  vec3 outCol = clamp(mix(energyMix, opticalMax, 0.52), 0.0, 1.0);
+
+  gl_FragColor = vec4(outCol, 1.0);
 }
 `;
 
@@ -195,11 +248,24 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
     let animationFrameId = 0;
     let program: WebGLProgram | null = null;
     let crossfadeProgram: WebGLProgram | null = null;
+    let feedbackProgram: WebGLProgram | null = null;
     let positionBuffer: WebGLBuffer | null = null;
     let fboFrom: WebGLFramebuffer | null = null;
     let fboTexture: WebGLTexture | null = null;
     let fboWidth = 0;
     let fboHeight = 0;
+
+    // Ping-pong framebuffers for PS2 VLM temporal trail persistence
+    let fboLive: WebGLFramebuffer | null = null;
+    let texLive: WebGLTexture | null = null;
+    let fboHistA: WebGLFramebuffer | null = null;
+    let texHistA: WebGLTexture | null = null;
+    let fboHistB: WebGLFramebuffer | null = null;
+    let texHistB: WebGLTexture | null = null;
+    let histWidth = 0;
+    let histHeight = 0;
+    let histPingPong = 0;
+
     let accumulatedTime = 12.5; // Start at a rich initial geometric phase even when waiting for music
     let lastFrameTime = performance.now();
     let lastMetricsEmit = 0;
@@ -256,6 +322,25 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
         }
       }
 
+      // Compile PS2 VLM Temporal Feedback program
+      const fbVs = compileShader(context, context.VERTEX_SHADER, VERTEX_SHADER_SOURCE);
+      const fbFs = compileShader(
+        context,
+        context.FRAGMENT_SHADER,
+        PS2_FEEDBACK_FRAGMENT_SHADER_SOURCE
+      );
+      if (fbVs && fbFs) {
+        const fbProg = context.createProgram();
+        if (fbProg) {
+          context.attachShader(fbProg, fbVs);
+          context.attachShader(fbProg, fbFs);
+          context.linkProgram(fbProg);
+          if (context.getProgramParameter(fbProg, context.LINK_STATUS)) {
+            feedbackProgram = fbProg;
+          }
+        }
+      }
+
       context.useProgram(prog);
 
       const buf = context.createBuffer();
@@ -278,36 +363,22 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
       return prog;
     };
 
-    const ensureOffscreenFbo = (
+    const createColorFbo = (
       context: WebGLRenderingContext,
       width: number,
       height: number
-    ): boolean => {
-      const targetW = Math.max(1, width);
-      const targetH = Math.max(1, height);
-      if (fboFrom && fboTexture && fboWidth === targetW && fboHeight === targetH) {
-        return true;
-      }
-      if (fboFrom) {
-        context.deleteFramebuffer(fboFrom);
-        fboFrom = null;
-      }
-      if (fboTexture) {
-        context.deleteTexture(fboTexture);
-        fboTexture = null;
-      }
-
+    ): { fb: WebGLFramebuffer; tex: WebGLTexture } | null => {
       const tex = context.createTexture();
       const fb = context.createFramebuffer();
-      if (!tex || !fb) return false;
+      if (!tex || !fb) return null;
 
       context.bindTexture(context.TEXTURE_2D, tex);
       context.texImage2D(
         context.TEXTURE_2D,
         0,
         context.RGBA,
-        targetW,
-        targetH,
+        width,
+        height,
         0,
         context.RGBA,
         context.UNSIGNED_BYTE,
@@ -334,13 +405,88 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
       if (status !== context.FRAMEBUFFER_COMPLETE) {
         context.deleteFramebuffer(fb);
         context.deleteTexture(tex);
+        return null;
+      }
+      return { fb, tex };
+    };
+
+    const ensureOffscreenFbo = (
+      context: WebGLRenderingContext,
+      width: number,
+      height: number
+    ): boolean => {
+      const targetW = Math.max(1, width);
+      const targetH = Math.max(1, height);
+      if (fboFrom && fboTexture && fboWidth === targetW && fboHeight === targetH) {
+        return true;
+      }
+      if (fboFrom) {
+        context.deleteFramebuffer(fboFrom);
+        fboFrom = null;
+      }
+      if (fboTexture) {
+        context.deleteTexture(fboTexture);
+        fboTexture = null;
+      }
+
+      const created = createColorFbo(context, targetW, targetH);
+      if (!created) return false;
+
+      fboFrom = created.fb;
+      fboTexture = created.tex;
+      fboWidth = targetW;
+      fboHeight = targetH;
+      return true;
+    };
+
+    const ensureHistoryFbos = (
+      context: WebGLRenderingContext,
+      width: number,
+      height: number
+    ): boolean => {
+      const targetW = Math.max(1, width);
+      const targetH = Math.max(1, height);
+      if (
+        fboLive &&
+        texLive &&
+        fboHistA &&
+        texHistA &&
+        fboHistB &&
+        texHistB &&
+        histWidth === targetW &&
+        histHeight === targetH
+      ) {
+        return true;
+      }
+
+      const cleanupPair = (fb: WebGLFramebuffer | null, tex: WebGLTexture | null) => {
+        if (fb) context.deleteFramebuffer(fb);
+        if (tex) context.deleteTexture(tex);
+      };
+      cleanupPair(fboLive, texLive);
+      cleanupPair(fboHistA, texHistA);
+      cleanupPair(fboHistB, texHistB);
+      fboLive = fboHistA = fboHistB = null;
+      texLive = texHistA = texHistB = null;
+
+      const live = createColorFbo(context, targetW, targetH);
+      const histA = createColorFbo(context, targetW, targetH);
+      const histB = createColorFbo(context, targetW, targetH);
+      if (!live || !histA || !histB) {
+        cleanupPair(live?.fb ?? null, live?.tex ?? null);
+        cleanupPair(histA?.fb ?? null, histA?.tex ?? null);
+        cleanupPair(histB?.fb ?? null, histB?.tex ?? null);
         return false;
       }
 
-      fboFrom = fb;
-      fboTexture = tex;
-      fboWidth = targetW;
-      fboHeight = targetH;
+      fboLive = live.fb;
+      texLive = live.tex;
+      fboHistA = histA.fb;
+      texHistA = histA.tex;
+      fboHistB = histB.fb;
+      texHistB = histB.tex;
+      histWidth = targetW;
+      histHeight = targetH;
       return true;
     };
 
@@ -365,6 +511,8 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
         uCoordSpace: context.getUniformLocation(prog, 'uCoordSpace'),
         uNegSpaceFill: context.getUniformLocation(prog, 'uNegSpaceFill'),
         uNegSpaceThreshold: context.getUniformLocation(prog, 'uNegSpaceThreshold'),
+        uCrtScanlines: context.getUniformLocation(prog, 'uCrtScanlines'),
+        uPs2ColorMatrix: context.getUniformLocation(prog, 'uPs2ColorMatrix'),
         uAudioSub: context.getUniformLocation(prog, 'uAudioSub'),
         uAudioMid: context.getUniformLocation(prog, 'uAudioMid'),
         uAudioHigh: context.getUniformLocation(prog, 'uAudioHigh'),
@@ -397,8 +545,26 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
       };
     };
 
+    const getFeedbackUniformLocations = (
+      context: WebGLRenderingContext,
+      prog: WebGLProgram | null
+    ) => {
+      if (!prog) return null;
+      return {
+        aPosition: context.getAttribLocation(prog, 'aPosition'),
+        uTexCurrent: context.getUniformLocation(prog, 'uTexCurrent'),
+        uTexHistory: context.getUniformLocation(prog, 'uTexHistory'),
+        iResolution: context.getUniformLocation(prog, 'iResolution'),
+        uPersistence: context.getUniformLocation(prog, 'uPersistence'),
+        uZoomWarp: context.getUniformLocation(prog, 'uZoomWarp'),
+        uRotWarp: context.getUniformLocation(prog, 'uRotWarp'),
+        uCenterOffset: context.getUniformLocation(prog, 'uCenterOffset'),
+      };
+    };
+
     let uniforms = getUniformLocations(gl, program);
     let crossfadeUniforms = getCrossfadeUniformLocations(gl, crossfadeProgram);
+    let feedbackUniforms = getFeedbackUniformLocations(gl, feedbackProgram);
 
     const handleResize = () => {
       if (!canvas || !gl) return;
@@ -426,10 +592,15 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
       fboTexture = null;
       fboWidth = 0;
       fboHeight = 0;
+      fboLive = fboHistA = fboHistB = null;
+      texLive = texHistA = texHistB = null;
+      histWidth = 0;
+      histHeight = 0;
       program = initWebGLResources(gl);
       if (program) {
         uniforms = getUniformLocations(gl, program);
         crossfadeUniforms = getCrossfadeUniformLocations(gl, crossfadeProgram);
+        feedbackUniforms = getFeedbackUniformLocations(gl, feedbackProgram);
         handleResize();
         lastFrameTime = performance.now();
         animationFrameId = requestAnimationFrame(render);
@@ -582,6 +753,8 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
           gl.uniform1i(core.uCoordSpace, passState.layerCoordSpace);
           gl.uniform1f(core.uNegSpaceFill, passState.negativeSpaceFill);
           gl.uniform1f(core.uNegSpaceThreshold, passState.negativeSpaceThreshold);
+          gl.uniform1f(core.uCrtScanlines, passState.crtScanlines ?? 0.0);
+          gl.uniform1f(core.uPs2ColorMatrix, passState.ps2ColorMatrix ?? 0.0);
 
           // Bind real-time Web Audio frequency band uniforms
           gl.uniform1f(core.uAudioSub, bands.sub);
@@ -642,50 +815,142 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
           }
         }
 
+        const renderCompositeScene = (
+          targetFbo: WebGLFramebuffer | null,
+          targetW: number,
+          targetH: number
+        ) => {
+          if (
+            activeFade &&
+            crossfadeProgram &&
+            crossfadeUniforms &&
+            ensureOffscreenFbo(gl, targetW, targetH)
+          ) {
+            // Smooth cosine S-curve ease between 0.0 and 1.0
+            const t = 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, Math.max(0, rawProgress)));
+
+            // Pass 1: Render outgoing preset (live-animated!) into offscreen texture fboFrom
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fboFrom);
+            gl.viewport(0, 0, fboWidth, fboHeight);
+            gl.disable(gl.BLEND);
+            renderShaderPass(activeFade.fromState, fboWidth, fboHeight);
+
+            // Pass 2: Render incoming preset (live-animated!) into targetFbo
+            gl.bindFramebuffer(gl.FRAMEBUFFER, targetFbo);
+            gl.viewport(0, 0, targetW, targetH);
+            renderShaderPass(s, targetW, targetH);
+
+            // Pass 3: Alpha-blend outgoing preset texture over incoming preset with opacity (1.0 - t)
+            gl.useProgram(crossfadeProgram);
+            if (positionBuffer && crossfadeUniforms.aPosition >= 0) {
+              gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+              gl.enableVertexAttribArray(crossfadeUniforms.aPosition);
+              gl.vertexAttribPointer(crossfadeUniforms.aPosition, 2, gl.FLOAT, false, 0, 0);
+            }
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, fboTexture);
+            gl.uniform1i(crossfadeUniforms.uTexFrom, 0);
+            gl.uniform2f(crossfadeUniforms.iResolution, targetW, targetH);
+            gl.uniform1f(crossfadeUniforms.uOpacity, 1.0 - t);
+
+            gl.enable(gl.BLEND);
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+            gl.colorMask(true, true, true, false); // Keep canvas alpha = 1.0 for PNG/Video capture
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            gl.colorMask(true, true, true, true);
+            gl.disable(gl.BLEND);
+            gl.bindTexture(gl.TEXTURE_2D, null);
+          } else {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, targetFbo);
+            gl.viewport(0, 0, targetW, targetH);
+            renderShaderPass(s, targetW, targetH);
+          }
+        };
+
+        // Determine effective trail persistence (interpolated during preset crossfades)
+        const baseTrail = s.trailPersistence ?? 0.0;
+        const fromTrail = activeFade ? (activeFade.fromState.trailPersistence ?? 0.0) : baseTrail;
+        const fadeEase = activeFade
+          ? 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, Math.max(0, rawProgress)))
+          : 1.0;
+        const effectiveTrail = fromTrail + (baseTrail - fromTrail) * fadeEase;
+
         if (
-          activeFade &&
-          crossfadeProgram &&
-          crossfadeUniforms &&
-          ensureOffscreenFbo(gl, canvas.width, canvas.height)
+          effectiveTrail > 0.01 &&
+          feedbackProgram &&
+          feedbackUniforms &&
+          ensureHistoryFbos(gl, canvas.width, canvas.height)
         ) {
-          // Smooth cosine S-curve ease between 0.0 and 1.0
-          const t = 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, Math.max(0, rawProgress)));
+          // 1. Render current frame into fboLive
+          renderCompositeScene(fboLive, histWidth, histHeight);
 
-          // Pass 1: Render outgoing preset (live-animated!) into offscreen texture fboFrom
-          gl.bindFramebuffer(gl.FRAMEBUFFER, fboFrom);
-          gl.viewport(0, 0, fboWidth, fboHeight);
-          gl.disable(gl.BLEND);
-          renderShaderPass(activeFade.fromState, fboWidth, fboHeight);
+          const readTex = histPingPong === 0 ? texHistA : texHistB;
+          const writeFbo = histPingPong === 0 ? fboHistB : fboHistA;
+          const writeTex = histPingPong === 0 ? texHistB : texHistA;
 
-          // Pass 2: Render incoming preset (live-animated!) directly onto main canvas
-          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-          gl.viewport(0, 0, canvas.width, canvas.height);
-          renderShaderPass(s, canvas.width, canvas.height);
+          const baseZoomWarp = s.trailZoomWarp ?? 0.009;
+          const audioZoomPulse =
+            bands.isPlaying && bands.reactivity > 0
+              ? baseZoomWarp * (1.0 + bands.sub * 0.55 + bands.beatPulse * 0.35)
+              : baseZoomWarp;
+          const rotWarp =
+            0.0025 * Math.sin(accumulatedTime * 0.45) * (s.swirlTwist >= 0 ? 1.0 : -1.0);
 
-          // Pass 3: Alpha-blend outgoing preset texture over incoming preset with opacity (1.0 - t)
-          gl.useProgram(crossfadeProgram);
-          if (positionBuffer && crossfadeUniforms.aPosition >= 0) {
+          // 2. Run PS2 VLM Temporal Feedback pass into writeFbo
+          gl.bindFramebuffer(gl.FRAMEBUFFER, writeFbo);
+          gl.viewport(0, 0, histWidth, histHeight);
+          gl.useProgram(feedbackProgram);
+          if (positionBuffer && feedbackUniforms.aPosition >= 0) {
             gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-            gl.enableVertexAttribArray(crossfadeUniforms.aPosition);
-            gl.vertexAttribPointer(crossfadeUniforms.aPosition, 2, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(feedbackUniforms.aPosition);
+            gl.vertexAttribPointer(feedbackUniforms.aPosition, 2, gl.FLOAT, false, 0, 0);
           }
           gl.activeTexture(gl.TEXTURE0);
-          gl.bindTexture(gl.TEXTURE_2D, fboTexture);
-          gl.uniform1i(crossfadeUniforms.uTexFrom, 0);
-          gl.uniform2f(crossfadeUniforms.iResolution, canvas.width, canvas.height);
-          gl.uniform1f(crossfadeUniforms.uOpacity, 1.0 - t);
+          gl.bindTexture(gl.TEXTURE_2D, texLive);
+          gl.uniform1i(feedbackUniforms.uTexCurrent, 0);
 
-          gl.enable(gl.BLEND);
-          gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-          gl.colorMask(true, true, true, false); // Keep canvas alpha = 1.0 for PNG/Video capture
+          gl.activeTexture(gl.TEXTURE1);
+          gl.bindTexture(gl.TEXTURE_2D, readTex);
+          gl.uniform1i(feedbackUniforms.uTexHistory, 1);
+
+          gl.uniform2f(feedbackUniforms.iResolution, histWidth, histHeight);
+          gl.uniform1f(feedbackUniforms.uPersistence, effectiveTrail);
+          gl.uniform1f(feedbackUniforms.uZoomWarp, audioZoomPulse);
+          gl.uniform1f(feedbackUniforms.uRotWarp, rotWarp);
+          gl.uniform2f(
+            feedbackUniforms.uCenterOffset,
+            currentMouseRef.current.x,
+            currentMouseRef.current.y
+          );
+
           gl.drawArrays(gl.TRIANGLES, 0, 6);
-          gl.colorMask(true, true, true, true);
-          gl.disable(gl.BLEND);
+
+          // 3. Blit writeTex to screen framebuffer (null)
+          if (crossfadeProgram && crossfadeUniforms) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.useProgram(crossfadeProgram);
+            if (positionBuffer && crossfadeUniforms.aPosition >= 0) {
+              gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+              gl.enableVertexAttribArray(crossfadeUniforms.aPosition);
+              gl.vertexAttribPointer(crossfadeUniforms.aPosition, 2, gl.FLOAT, false, 0, 0);
+            }
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, writeTex);
+            gl.uniform1i(crossfadeUniforms.uTexFrom, 0);
+            gl.uniform2f(crossfadeUniforms.iResolution, canvas.width, canvas.height);
+            gl.uniform1f(crossfadeUniforms.uOpacity, 1.0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+          }
+
+          gl.activeTexture(gl.TEXTURE1);
           gl.bindTexture(gl.TEXTURE_2D, null);
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, null);
+
+          histPingPong = 1 - histPingPong;
         } else {
-          gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-          gl.viewport(0, 0, canvas.width, canvas.height);
-          renderShaderPass(s, canvas.width, canvas.height);
+          renderCompositeScene(null, canvas.width, canvas.height);
         }
       }
 
@@ -723,12 +988,21 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
       if (gl && crossfadeProgram) {
         gl.deleteProgram(crossfadeProgram);
       }
+      if (gl && feedbackProgram) {
+        gl.deleteProgram(feedbackProgram);
+      }
       if (gl && fboFrom) {
         gl.deleteFramebuffer(fboFrom);
       }
       if (gl && fboTexture) {
         gl.deleteTexture(fboTexture);
       }
+      if (gl && fboLive) gl.deleteFramebuffer(fboLive);
+      if (gl && texLive) gl.deleteTexture(texLive);
+      if (gl && fboHistA) gl.deleteFramebuffer(fboHistA);
+      if (gl && texHistA) gl.deleteTexture(texHistA);
+      if (gl && fboHistB) gl.deleteFramebuffer(fboHistB);
+      if (gl && texHistB) gl.deleteTexture(texHistB);
       if (gl && positionBuffer) {
         gl.deleteBuffer(positionBuffer);
       }

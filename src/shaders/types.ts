@@ -80,11 +80,18 @@ export interface ShaderState {
   negativeSpaceThreshold: number;
   layerOrder: string[];
 
+  // PS2 VLM Temporal Feedback & Trinitron Post-Processing
+  trailPersistence?: number; // 0.0 - 0.94 frame-buffer motion trail persistence
+  trailZoomWarp?: number; // -0.03 - 0.03 radial zoom/swirl smear per feedback frame
+  crtScanlines?: number; // 0.0 - 1.0 Sony Trinitron CRT scanlines & phosphor bloom
+  ps2ColorMatrix?: number; // 0.0 - 1.0 Y2K PS2 BIOS cobalt/indigo/cyan color grade
+
   // Dynamic map of layerId -> { mix, values }
   layers: Record<string, LayerRuntimeState>;
 }
 
 export type PresetCategory =
+  | 'ps2-visualizer'
   | 'new-layers'
   | 'fractal-cascades'
   | 'order-inversions'

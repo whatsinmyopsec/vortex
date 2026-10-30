@@ -80,6 +80,10 @@ export const DEFAULT_SHADER_STATE: ShaderState = {
   layerCoordSpace: 0,
   negativeSpaceFill: 0.94,
   negativeSpaceThreshold: 0.25,
+  trailPersistence: 0.0,
+  trailZoomWarp: 0.009,
+  crtScanlines: 0.0,
+  ps2ColorMatrix: 0.0,
   layerOrder: buildDefaultLayerOrder(SHADER_LAYERS),
   layers: buildDefaultLayersState(SHADER_LAYERS),
 };
@@ -101,6 +105,10 @@ function withLayerOverrides(
     layerCoordSpace?: ShaderState['layerCoordSpace'];
     negativeSpaceFill?: number;
     negativeSpaceThreshold?: number;
+    trailPersistence?: number;
+    trailZoomWarp?: number;
+    crtScanlines?: number;
+    ps2ColorMatrix?: number;
     layerOrder?: string[];
     mixes: Record<string, number>;
     subValues?: Record<string, Record<string, number>>;
@@ -143,12 +151,193 @@ function withLayerOverrides(
     layerCoordSpace: overrides.layerCoordSpace ?? 0,
     negativeSpaceFill: overrides.negativeSpaceFill ?? 0.92,
     negativeSpaceThreshold: overrides.negativeSpaceThreshold ?? 0.24,
+    trailPersistence: overrides.trailPersistence ?? 0.0,
+    trailZoomWarp: overrides.trailZoomWarp ?? 0.009,
+    crtScanlines: overrides.crtScanlines ?? 0.0,
+    ps2ColorMatrix: overrides.ps2ColorMatrix ?? 0.0,
     layerOrder: finalOrder,
     layers: nextLayers,
   };
 }
 
 export const SHADER_PRESETS: PresetItem[] = [
+  // ============================================================================
+  // PLAYSTATION 2 (PS2) BIOS & VLM AUDIO VISUALIZER PRESETS
+  // ============================================================================
+  {
+    id: 'ps2-bios-towers-orbs',
+    name: 'PS2 System BIOS: Crystal Towers & 7 Orbs',
+    subtitle:
+      '#1 Layer 27 (PS2 BIOS Monolithic Crystal Towers & 7 Orbiting Cyan Orbs) cascading into #2 Layer 28 (PS2 VLM Waveform Ribbon), #3 Layer 20 (Cherenkov Matrix), and #4 Layer 03 (Orbital Starfield) with Temporal Motion Trails',
+    badge: 'PS2 BIOS · Towers & 7 Orbs',
+    category: 'ps2-visualizer',
+    mechanics: [
+      '82% Temporal Trail Smear',
+      'PS2 BIOS Towers #1',
+      '7-Orb Comet Trails',
+      'Y2K Cobalt Matrix',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.15,
+        swirlTwist: 0.95,
+        polarDepth: 0.32,
+        flowSpeed: 0.48,
+        angularSpeed: 0.07,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.88,
+        negativeSpaceThreshold: 0.22,
+        trailPersistence: 0.82,
+        trailZoomWarp: 0.009,
+        crtScanlines: 0.32,
+        ps2ColorMatrix: 0.85,
+        layerOrder: ['ps2bios', 'ps2vlm', 'cherenkov', 'starfield'],
+        mixes: {
+          ps2bios: 0.96,
+          ps2vlm: 0.84,
+          cherenkov: 0.68,
+          starfield: 0.75,
+        },
+        subValues: {
+          ps2bios: { density: 5.5, orbGlow: 1.65, fogDepth: 1.35 },
+          ps2vlm: { waveAmp: 1.35, bandCount: 24.0, ribbonGlow: 1.45 },
+          cherenkov: { scale: 6.0, pulse: 1.35 },
+          starfield: { speed: 1.15, size: 0.055 },
+        },
+      }),
+  },
+  {
+    id: 'ps2-cd-vlm-waveform',
+    name: 'PS2 CD Audio Player: VLM Waveform Ribbon',
+    subtitle:
+      '#1 Layer 28 (PS2 VLM 3D Oscilloscope Ribbons & Radial EQ) over #2 Layer 19 (Lissajous Laser), #3 Layer 26 (4D Kleinian Lattice), and #4 Layer 01 (Cobalt Polar Tunnel) with Liquid Frame Feedback',
+    badge: 'PS2 CD Player · VLM Mode',
+    category: 'ps2-visualizer',
+    mechanics: [
+      '86% VLM Frame Feedback',
+      '3D Waveform Ribbons',
+      '28-Band Radial EQ',
+      'Trinitron Phosphor',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 2,
+        distortionStrength: 1.25,
+        swirlTwist: 1.15,
+        polarDepth: 0.3,
+        flowSpeed: 0.65,
+        angularSpeed: 0.1,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.86,
+        negativeSpaceThreshold: 0.2,
+        trailPersistence: 0.86,
+        trailZoomWarp: 0.013,
+        crtScanlines: 0.36,
+        ps2ColorMatrix: 0.72,
+        layerOrder: ['ps2vlm', 'lissajous', 'klein4d', 'tunnel'],
+        mixes: {
+          ps2vlm: 0.98,
+          lissajous: 0.82,
+          klein4d: 0.76,
+          tunnel: 0.72,
+        },
+        subValues: {
+          ps2vlm: { waveAmp: 1.55, bandCount: 28.0, ribbonGlow: 1.65 },
+          lissajous: { ratioX: 3.0, ratioY: 4.0, glow: 1.55 },
+          tunnel: { freq: 12.0, tone: 0.92, contrast: 2.4 },
+        },
+      }),
+  },
+  {
+    id: 'ps2-y2k-liquid-feedback',
+    name: 'PS2 Late-Night Y2K: Liquid Feedback Matrix',
+    subtitle:
+      'Hypnotic 88% temporal zoom-feedback loop fusing #1 PS2 VLM Ribbon, #2 PS2 BIOS Towers, #3 KIFS Crystal, and #4 Event Horizon Accretion into liquid cobalt light trails',
+    badge: 'PS2 Y2K · 88% Trail Loop',
+    category: 'ps2-visualizer',
+    mechanics: [
+      '88% Liquid Persistence',
+      'Inward Zoom Smear',
+      'Cobalt-Indigo Grade',
+      'Beat-Reactive Surge',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.35,
+        swirlTwist: 1.25,
+        polarDepth: 0.28,
+        flowSpeed: 0.58,
+        angularSpeed: 0.09,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.85,
+        negativeSpaceThreshold: 0.21,
+        trailPersistence: 0.88,
+        trailZoomWarp: -0.011,
+        crtScanlines: 0.28,
+        ps2ColorMatrix: 0.9,
+        layerOrder: ['ps2vlm', 'ps2bios', 'kifscrystal', 'accretion'],
+        mixes: {
+          ps2vlm: 0.92,
+          ps2bios: 0.88,
+          kifscrystal: 0.78,
+          accretion: 0.84,
+        },
+        subValues: {
+          ps2vlm: { waveAmp: 1.45, bandCount: 32.0, ribbonGlow: 1.55 },
+          ps2bios: { density: 6.5, orbGlow: 1.75, fogDepth: 1.25 },
+          accretion: { radius: 0.16, spin: 1.25 },
+        },
+      }),
+  },
+  {
+    id: 'ps2-trinitron-cyber-equalizer',
+    name: 'PS2 Trinitron 2000: Cyber Spectrum Tunnel',
+    subtitle:
+      '3D Polar-wrapped #1 PS2 BIOS Towers → #2 Smith Truchet Conduits → #3 PS2 VLM Spectrum → #4 Sapphire Tunnel with Sony Trinitron CRT scanlines',
+    badge: 'PS2 Trinitron · 3D Polar',
+    category: 'ps2-visualizer',
+    mechanics: [
+      '3D Polar Wrapping',
+      'Trinitron CRT 48%',
+      '78% Motion Trails',
+      'Sapphire Tunnel',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 1,
+        distortionStrength: 1.3,
+        swirlTwist: 1.05,
+        polarDepth: 0.34,
+        flowSpeed: 0.62,
+        angularSpeed: 0.08,
+        layerBlendStyle: 0,
+        layerCoordSpace: 1,
+        negativeSpaceFill: 0.9,
+        negativeSpaceThreshold: 0.23,
+        trailPersistence: 0.78,
+        trailZoomWarp: 0.012,
+        crtScanlines: 0.48,
+        ps2ColorMatrix: 0.8,
+        layerOrder: ['ps2bios', 'truchet', 'ps2vlm', 'tunnel'],
+        mixes: {
+          ps2bios: 0.94,
+          truchet: 0.86,
+          ps2vlm: 0.82,
+          tunnel: 0.88,
+        },
+        subValues: {
+          ps2bios: { density: 5.0, orbGlow: 1.5, fogDepth: 1.2 },
+          truchet: { scale: 7.0, pulse: 1.4 },
+          tunnel: { freq: 14.0, tone: 0.95, contrast: 2.5 },
+        },
+      }),
+  },
+
   // ============================================================================
   // NEW LAYERS & NEGATIVE-SPACE CASCADES
   // ============================================================================
@@ -1261,12 +1450,12 @@ export const SHADER_PRESETS: PresetItem[] = [
   },
   {
     id: 'omni-twenty-five-layer-symphony',
-    name: '26-Layer Negative-Space Superposition',
+    name: '28-Layer Negative-Space Superposition',
     subtitle:
-      'Sequential negative-space cascade across all 26 modular shader layers in priority order',
-    badge: 'All 26 Layers',
+      'Sequential negative-space cascade across all 28 modular shader layers in priority order',
+    badge: 'All 28 Layers',
     category: 'new-layers',
-    mechanics: ['All 26 Layers Active', 'Neg-Space 88%', 'Gate 0.26', 'Gravity Ripple'],
+    mechanics: ['All 28 Layers Active', 'Neg-Space 88%', 'Gate 0.26', 'Gravity Ripple'],
     apply: (base) =>
       withLayerOverrides(base, {
         distortionMode: 2,
@@ -1276,6 +1465,8 @@ export const SHADER_PRESETS: PresetItem[] = [
         negativeSpaceFill: 0.88,
         negativeSpaceThreshold: 0.26,
         mixes: {
+          ps2bios: 0.72,
+          ps2vlm: 0.68,
           klein4d: 0.78,
           mandelbrot: 0.75,
           julia: 0.7,
@@ -1388,6 +1579,8 @@ uniform int uBlendStyle;
 uniform int uCoordSpace;
 uniform float uNegSpaceFill;
 uniform float uNegSpaceThreshold;
+uniform float uCrtScanlines;
+uniform float uPs2ColorMatrix;
 
 // Real-Time Web Audio Analyser Uniforms (Audio-Reactive GLSL Bridge)
 uniform float uAudioSub;
@@ -1454,6 +1647,27 @@ ${layerCompositePhase2}
     col *= 1.0 + audioMidBoost * 0.08;
     float cursorHalo = exp(-dMouse * 9.5) * (0.05 * uDistortion + 0.18 * uPulse + 0.05 * audioHighBoost);
     col += cursorHalo * vec3(1.0, 0.88, 0.65);
+
+    // Optional Y2K PlayStation 2 Cobalt/Indigo/Cyan Optical Color Matrix
+    if (uPs2ColorMatrix > 0.001) {
+        float luma = dot(col, vec3(0.299, 0.587, 0.114));
+        vec3 ps2Deep = vec3(0.04, 0.16, 0.58) * luma * 1.45;
+        vec3 ps2High = vec3(0.28, 0.82, 1.0) * pow(max(luma, 0.0), 1.35) * 1.65;
+        vec3 ps2Graded = mix(ps2Deep + ps2High, col * vec3(0.55, 0.88, 1.32), 0.45);
+        col = mix(col, ps2Graded, clamp(uPs2ColorMatrix, 0.0, 1.0));
+    }
+
+    // Optional Sony Trinitron CRT Scanline & Aperture Grille Phosphor Mask
+    if (uCrtScanlines > 0.001) {
+        float scanWave = 0.5 + 0.5 * sin(fc.y * 3.14159265);
+        float grilleR = 0.88 + 0.12 * sin(fc.x * 2.094395);
+        float grilleG = 0.88 + 0.12 * sin(fc.x * 2.094395 + 2.094395);
+        float grilleB = 0.88 + 0.12 * sin(fc.x * 2.094395 + 4.188790);
+        vec3 trinitron = col * vec3(grilleR, grilleG, grilleB) * mix(1.0, 0.72 + 0.36 * scanWave, clamp(uCrtScanlines, 0.0, 1.0));
+        // Subtle CRT corner vignette
+        float vig = smoothstep(1.35, 0.45, length(p0) * 1.25);
+        col = mix(col, trinitron * mix(1.0, vig, 0.35), clamp(uCrtScanlines, 0.0, 1.0));
+    }
 
     o = vec4(col, 1.0);
 }
