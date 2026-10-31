@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ChevronDown,
   ChevronsUp,
   ChevronUp,
   GripVertical,
+  Sliders,
+  X,
 } from 'lucide-react';
 import { LayerRuntimeState, ShaderLayerDefinition } from '../shaders/types';
 
@@ -48,10 +50,20 @@ export const LayerCard: React.FC<LayerCardProps> = ({
 }) => {
   const mixVal = runtime?.mix ?? layer.defaultMix;
   const isActive = mixVal > 0.01;
+  const [manualOpen, setManualOpen] = useState(false);
+  const showParams = isActive || manualOpen;
 
   const ensureLayerVisible = () => {
     if (mixVal <= 0.01) {
       onMixChange(layer.id, layer.defaultMix > 0.05 ? layer.defaultMix : 0.75);
+    }
+  };
+
+  const toggleLayerOnOff = () => {
+    if (isActive) {
+      onMixChange(layer.id, 0.0);
+    } else {
+      onMixChange(layer.id, layer.defaultMix > 0.05 ? layer.defaultMix : 0.78);
     }
   };
 
@@ -62,14 +74,16 @@ export const LayerCard: React.FC<LayerCardProps> = ({
       onDragOver={(e) => onDragOver(e, layer.id)}
       onDrop={() => onDrop(layer.id)}
       onDragEnd={onDragEnd}
-      className={`p-3 rounded-lg border transition-all space-y-2.5 ${
+      className={`rounded-lg border transition-all ${
+        isActive ? 'p-3 space-y-2.5' : 'px-3 py-2 space-y-1.5'
+      } ${
         isDragOver
           ? 'bg-amber-500/15 border-amber-400 ring-1 ring-amber-400/50'
           : isDragging
           ? 'opacity-45 border-amber-400/50 bg-white/[0.06]'
           : isActive
-          ? 'bg-white/[0.045] border-white/20'
-          : 'bg-white/[0.015] border-white/10 opacity-85 hover:opacity-100'
+          ? 'bg-white/[0.055] border-amber-400/35'
+          : 'bg-white/[0.015] border-white/10 opacity-80 hover:opacity-100 hover:border-white/20'
       }`}
     >
       {/* Layer Header, Reorder Controls & Master Mix Slider */}
@@ -82,89 +96,111 @@ export const LayerCard: React.FC<LayerCardProps> = ({
             >
               <GripVertical className="w-3.5 h-3.5" />
             </span>
-            <span
-              className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold shrink-0 ${
+            <button
+              type="button"
+              onClick={toggleLayerOnOff}
+              className={`px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold shrink-0 transition-colors cursor-pointer ${
                 activeChainRank === 1
                   ? 'bg-amber-400 text-neutral-950'
                   : activeChainRank !== null
                   ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/40'
-                  : 'bg-white/5 text-neutral-400 border border-white/10'
+                  : 'bg-white/5 text-neutral-400 border border-white/10 hover:text-white'
               }`}
               title={
-                activeChainRank === 1
-                  ? 'Primary Foreground Layer (#1) — its negative space is filled by #2'
-                  : activeChainRank !== null
-                  ? `Active Negative-Space Chain #${activeChainRank} (fills negative space of #1..#${activeChainRank - 1})`
-                  : `Stack Position #${orderIndex + 1}`
+                isActive
+                  ? 'Click to mute this layer (0%)'
+                  : 'Click to enable this layer'
               }
             >
               {activeChainRank !== null ? `#${activeChainRank}` : `${orderIndex + 1}`}
-            </span>
-            <label
-              htmlFor={`slider-${layer.id}-mix`}
-              className="text-white font-semibold truncate cursor-pointer"
+            </button>
+            <button
+              type="button"
+              onClick={toggleLayerOnOff}
+              className={`text-left truncate cursor-pointer transition-colors ${
+                isActive ? 'text-white font-semibold' : 'text-neutral-300 hover:text-white font-medium'
+              }`}
               title={layer.description}
             >
               {layer.name}
-            </label>
+            </button>
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
-            {/* Reorder buttons: Top, Up, Down */}
-            {orderIndex > 0 && (
+            {isActive && orderIndex > 0 && (
               <button
                 type="button"
                 onClick={() => onMoveToTop(layer.id)}
-                title="Move to #1 (Front of Negative-Space Chain)"
+                title="Promote to #1 Foreground"
                 className="p-1 rounded bg-white/5 border border-white/10 text-neutral-300 hover:text-amber-300 hover:bg-white/10 transition-colors cursor-pointer"
               >
                 <ChevronsUp className="w-3 h-3" />
               </button>
             )}
-            <button
-              type="button"
-              disabled={orderIndex === 0}
-              onClick={() => onMoveUp(layer.id)}
-              title="Move layer up in stack order"
-              className="p-1 rounded bg-white/5 border border-white/10 text-neutral-300 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
-            >
-              <ChevronUp className="w-3 h-3" />
-            </button>
-            <button
-              type="button"
-              disabled={orderIndex === totalLayers - 1}
-              onClick={() => onMoveDown(layer.id)}
-              title="Move layer down in stack order"
-              className="p-1 rounded bg-white/5 border border-white/10 text-neutral-300 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
-            >
-              <ChevronDown className="w-3 h-3" />
-            </button>
+            {isActive && (
+              <>
+                <button
+                  type="button"
+                  disabled={orderIndex === 0}
+                  onClick={() => onMoveUp(layer.id)}
+                  title="Move layer up"
+                  className="p-1 rounded bg-white/5 border border-white/10 text-neutral-300 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
+                >
+                  <ChevronUp className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  disabled={orderIndex === totalLayers - 1}
+                  onClick={() => onMoveDown(layer.id)}
+                  title="Move layer down"
+                  className="p-1 rounded bg-white/5 border border-white/10 text-neutral-300 hover:text-white hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
+                >
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+              </>
+            )}
             <button
               type="button"
               onClick={() => onSolo(layer.id)}
+              title="Solo this layer"
               className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] text-neutral-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
             >
               Solo
             </button>
-            <span className="font-mono tabular-nums text-amber-400 w-9 text-right">
+            {isActive ? (
+              <button
+                type="button"
+                onClick={() => onMixChange(layer.id, 0.0)}
+                title="Turn off layer (0%)"
+                className="p-1 rounded bg-white/5 border border-white/10 text-neutral-400 hover:text-rose-300 hover:border-rose-400/40 transition-colors cursor-pointer"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            ) : (
+              layer.subParams.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setManualOpen((prev) => !prev)}
+                  title="Show/hide layer parameters"
+                  className={`p-1 rounded border transition-colors cursor-pointer ${
+                    manualOpen
+                      ? 'bg-amber-500/20 border-amber-400/50 text-amber-300'
+                      : 'bg-white/5 border-white/10 text-neutral-400 hover:text-white'
+                  }`}
+                >
+                  <Sliders className="w-3 h-3" />
+                </button>
+              )
+            )}
+            <span
+              className={`font-mono tabular-nums w-9 text-right ${
+                isActive ? 'text-amber-400 font-semibold' : 'text-neutral-500'
+              }`}
+            >
               {(mixVal * 100).toFixed(0)}%
             </span>
           </div>
         </div>
-
-        {/* Active Negative-Space Role Sub-Label */}
-        {activeChainRank !== null && (
-          <div className="flex items-center justify-between text-[10px] text-neutral-400 pl-5">
-            <span>
-              {activeChainRank === 1
-                ? 'Foreground #1 — carves negative space for #2'
-                : `Fills negative space left by #${activeChainRank - 1}`}
-            </span>
-            <span className="font-mono text-neutral-500">
-              Stack #{orderIndex + 1}
-            </span>
-          </div>
-        )}
 
         <input
           id={`slider-${layer.id}-mix`}
@@ -178,10 +214,10 @@ export const LayerCard: React.FC<LayerCardProps> = ({
         />
       </div>
 
-      {/* Core Layer Shader Parameters */}
-      {layer.subParams.length > 0 && (
+      {/* Core Layer Shader Parameters (Automatically shown when active or manually expanded) */}
+      {showParams && layer.subParams.length > 0 && (
         <div
-          className={`grid gap-2.5 pt-1 ${
+          className={`grid gap-2.5 pt-1.5 border-t border-white/10 ${
             layer.subParams.length === 1
               ? 'grid-cols-1'
               : layer.subParams.length === 3
@@ -222,4 +258,5 @@ export const LayerCard: React.FC<LayerCardProps> = ({
     </div>
   );
 };
+
 

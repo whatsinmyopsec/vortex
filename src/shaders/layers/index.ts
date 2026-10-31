@@ -2351,7 +2351,7 @@ export const klein4dLayer: ShaderLayerDefinition = {
     decimals: 2,
   },
   description:
-    '80-step 4D raymarched spherical inversion lattice (k = scale / dot(p, p), p = abs(p - round(p))) with 4-axis audio & mouse rotations, 4D cross-polytope tubes, and hyperbolic tanh tone-mapping.',
+    '80-step 4D raymarched spherical inversion lattice — Pure Spheres (d2 = length(p) - 0.28, d4 = length(p.xw) - 0.2, no line/cylinder metrics) with log2(k) chromatic phase modulation and hyperbolic tanh tone-mapping.',
   subParams: [
     {
       key: 'invScale',
@@ -2360,7 +2360,7 @@ export const klein4dLayer: ShaderLayerDefinition = {
       min: 5.0,
       max: 16.0,
       step: 0.2,
-      defaultValue: 10.0,
+      defaultValue: 10.2,
       format: (v) => v.toFixed(1),
       lfo: { freq: 0.22, phase: 0.8, min: 7.5, max: 13.0, decimals: 1 },
     },
@@ -2371,38 +2371,27 @@ export const klein4dLayer: ShaderLayerDefinition = {
       min: 0.05,
       max: 0.8,
       step: 0.01,
-      defaultValue: 0.25,
+      defaultValue: 0.28,
       format: (v) => `${v.toFixed(2)}x`,
       lfo: { freq: 0.28, phase: 2.1, min: 0.15, max: 0.55, decimals: 2 },
     },
   ],
   glslFunction: `
+// 4D Kleinian Spherical Inversion Lattice - Pure Spheres (No Lines)
 vec4 klein4dRound(vec4 x) {
     return floor(x + 0.5);
 }
 
 vec4 klein4dTanh(vec4 x) {
     vec4 cx = clamp(x, -10.0, 10.0);
-    vec4 e2x = exp(2.0 * cx);
-    return (e2x - 1.0) / (e2x + 1.0);
+    vec4 e = exp(2.0 * cx);
+    return (e - 1.0) / (e + 1.0);
 }
 
 vec3 evalKlein4dLattice(vec2 coord, float invScale, float forwardSpeed) {
-    float bass = clamp(uAudioSub * uAudioReactivity, 0.0, 1.5);
-    float mid = clamp(uAudioMid * uAudioReactivity, 0.0, 1.5);
-    float high = clamp(uAudioHigh * uAudioReactivity, 0.0, 1.5);
-    float overall = (bass + mid + high) * 0.3333;
-
-    // Smooth, continuous time progression
-    float T = iTime * 0.12 + overall * 0.008;
+    float T = iTime * 0.12;
     float F = fract(T);
     float t = floor(T) + smoothstep(0.0, 1.0, F);
-
-    // Mouse influence (uMouse is centered around 0.0 in [-0.5, 0.5])
-    vec2 mouseOffset = uMouse;
-    float mouseInfluenceX = mouseOffset.x * 0.4;
-    float mouseInfluenceY = mouseOffset.y * 0.4;
-    float mouseDistance = length(mouseOffset) * 0.3;
 
     vec4 o = vec4(0.0);
     vec4 p = vec4(0.0);
@@ -2412,36 +2401,19 @@ vec3 evalKlein4dLattice(vec2 coord, float invScale, float forwardSpeed) {
     float d = 0.0;
     float k = 0.0;
 
-    // Rotation rates with enhanced mouse & audio influence
-    float rot1 = 0.002 + bass * 0.001 + mouseInfluenceX * 0.15;
-    float rot2 = 0.0015 + mid * 0.001 + mouseInfluenceY * 0.15;
-    float rot3 = 0.001 + overall * 0.0008 + mouseDistance * 0.1;
-
-    mat2 R1 = mat2(cos(rot1), -sin(rot1), sin(rot1), cos(rot1));
-    mat2 R2 = mat2(cos(rot2), -sin(rot2), sin(rot2), cos(rot2));
-    mat2 R3 = mat2(cos(rot3), -sin(rot3), sin(rot3), cos(rot3));
-
-    float mouseRot = mouseInfluenceX * 0.08 + mouseInfluenceY * 0.08;
-    mat2 RMouse = mat2(cos(mouseRot), -sin(mouseRot), sin(mouseRot), cos(mouseRot));
-
-    // Steady forward motion with gentle audio influence
-    float forwardMotion = iTime * forwardSpeed + bass * 0.08 + mid * 0.05;
+    mat2 R1 = mat2(cos(0.002), -sin(0.002), sin(0.002), cos(0.002));
+    mat2 R2 = mat2(cos(0.0015), -sin(0.0015), sin(0.0015), cos(0.0015));
+    mat2 R3 = mat2(cos(0.001), -sin(0.001), sin(0.001), cos(0.001));
     vec3 rayDir = normalize(vec3(coord, 1.0));
-    float beatPulse = 0.035 + bass * 0.025 + high * 0.015;
 
     for (int idx = 0; idx < 80; idx++) {
         p = vec4(z * rayDir, 0.15);
-
-        // Continuous forward journey
-        p.z -= 1.5 + forwardMotion;
-        p.w += 0.4 + 0.05 * mid;
-
-        // Apply 4D rotations with smooth mouse influence
+        p.z -= 1.5 + iTime * forwardSpeed;
+        p.w += 0.4;
         p.xw = R1 * p.xw;
         p.yw = R2 * p.yw;
         p.zw = R3 * p.zw;
         p.xy = R1 * p.xy;
-        p.xz = RMouse * p.xz;
 
         k = invScale / max(dot(p, p), 1e-5);
         p *= k;
@@ -2449,13 +2421,10 @@ vec3 evalKlein4dLattice(vec2 coord, float invScale, float forwardSpeed) {
         P = p;
         p = abs(p - klein4dRound(p));
 
-        // 4D Geometric shapes with subtle audio variation
-        float d1 = min(min(length(p.xz), length(p.yz)), length(p.xy));
-        float d2 = length(p) - (0.2 + bass * 0.02);
-        float d3 = min(p.w, min(p.x, min(p.z, p.y))) + 0.04;
-        float d4 = length(p.xw) - (0.12 + mid * 0.015);
-
-        d = abs(min(min(min(d1, d2), d3), d4)) / max(k, 1e-5);
+        // Pure spheres only - removed line/cylinder distance metrics
+        float d2 = length(p) - 0.28;
+        float d4 = length(p.xw) - 0.2;
+        d = abs(min(d2, d4)) / max(k, 1e-5);
 
         float logK = log2(max(k, 1e-5));
         vec4 colorMod = vec4(
@@ -2464,23 +2433,20 @@ vec3 evalKlein4dLattice(vec2 coord, float invScale, float forwardSpeed) {
             1.1 + sin(P.x + logK + U.z) * 0.8,
             1.1 + sin(P.y + logK + U.w) * 0.8
         );
-
-        o += U * beatPulse + colorMod / max(d, 1e-3) * 0.7;
+        o += U * 0.035 + colorMod / max(d, 1e-3) * 0.7;
         z += 0.7 * d + 1e-3;
     }
 
-    float contrast = 1.0 + overall * 0.08;
-    o = klein4dTanh(o * contrast / 8500.0) / 0.83;
-    vec3 col = mix(o.rgb, o.rgb * vec3(1.05, 1.0, 0.98), 0.15);
-    return clamp(col, 0.0, 2.5);
+    o = klein4dTanh(o / 8500.0) / 0.83;
+    return clamp(mix(o.rgb, o.rgb * vec3(1.05, 1.0, 0.98), 0.15), 0.0, 2.5);
 }
 `,
   glslEvalExpr:
     'evalKlein4dLattice(domainCoord, uKlein4dScale, uKlein4dSpeed)',
   shadertoyHelper: (v) => {
-    const sc = (v.invScale ?? 10.0).toFixed(1);
-    const sp = (v.speed ?? 0.25).toFixed(2);
-    return `// 4D Kleinian Spherical Inversion Lattice
+    const sc = (v.invScale ?? 10.2).toFixed(1);
+    const sp = (v.speed ?? 0.28).toFixed(2);
+    return `// 4D Kleinian Spherical Inversion Lattice - Pure Spheres (No Lines)
 vec4 klein4dRound(vec4 x) { return floor(x + 0.5); }
 vec4 klein4dTanh(vec4 x) { vec4 cx = clamp(x, -10.0, 10.0); vec4 e = exp(2.0 * cx); return (e - 1.0) / (e + 1.0); }
 vec3 evalKlein4dLattice(vec2 coord) {
@@ -2499,11 +2465,10 @@ vec3 evalKlein4dLattice(vec2 coord) {
         k = ${sc} / max(dot(p, p), 1e-5);
         p *= k; P = p -= 0.3 * t;
         p = abs(p - klein4dRound(p));
-        float d1 = min(min(length(p.xz), length(p.yz)), length(p.xy));
-        float d2 = length(p) - 0.2;
-        float d3 = min(p.w, min(p.x, min(p.z, p.y))) + 0.04;
-        float d4 = length(p.xw) - 0.12;
-        d = abs(min(min(min(d1, d2), d3), d4)) / max(k, 1e-5);
+        // Pure spheres only - removed line/cylinder distance metrics
+        float d2 = length(p) - 0.28;
+        float d4 = length(p.xw) - 0.2;
+        d = abs(min(d2, d4)) / max(k, 1e-5);
         float logK = log2(max(k, 1e-5));
         vec4 colorMod = vec4(1.1 + sin(P.z + logK + U.x) * 0.8, 1.1 + sin(P.w + logK + U.y) * 0.8, 1.1 + sin(P.x + logK + U.z) * 0.8, 1.1 + sin(P.y + logK + U.w) * 0.8);
         o += U * 0.035 + colorMod / max(d, 1e-3) * 0.7;
@@ -2514,7 +2479,7 @@ vec3 evalKlein4dLattice(vec2 coord) {
 }`;
   },
   shadertoyMain: (mix) =>
-    `    // Layer 26: 4D Kleinian Inversion Lattice
+    `    // Layer 26: 4D Kleinian Inversion Lattice (Pure Spheres)
     col += evalKlein4dLattice(domainCoord) * ${mix.toFixed(2)};`,
 };
 
@@ -2990,7 +2955,7 @@ vec3 evalNeonCrystalCorridor(vec2 coord, float portalDensity, float rockRelief, 
 
     // Camera flying steadily forward down the crystalline corridor
     float flySpeed = 1.85;
-    float camZ = iTime * flySpeed + bass * 0.12;
+    float camZ = iTime * flySpeed + bass * 0.22;
     vec2 camSway = vec2(sin(iTime * 0.55) * 0.06, cos(iTime * 0.45) * 0.05);
     vec3 ro = vec3(camSway, camZ);
 
@@ -3253,8 +3218,9 @@ float sdEquilateralTri(vec2 p, float r) {
 // Evaluates the 20-slice neon triangle tunnel along a given ray UV (used for both direct view & wet floor reflection)
 vec3 traceNeonTriangleStack(vec2 rayUv, float twistScale, float crispness, float bass, float high, float isReflection) {
     vec3 stackCol = vec3(0.0);
-    float forwardSpeed = 1.5 + bass * 0.18;
-    float pixelScale = 1.0 / max(iResolution.y, 400.0);
+    float forwardSpeed = 1.5 + bass * 0.22;
+    float zoomScale = 1.0 + max(0.0, uBassZoom) * 1.15;
+    float pixelScale = 1.0 / max(iResolution.y * zoomScale, 400.0);
 
     for (int idx = 0; idx < 20; idx++) {
         float i = float(idx);
@@ -3272,8 +3238,8 @@ vec3 traceNeonTriangleStack(vec2 rayUv, float twistScale, float crispness, float
         float angle = (zDepth * 0.15 + iTime * 0.8) * twistScale;
         p = triPortalRot(angle) * p;
 
-        // Equilateral triangle SDF + crisp dual-rail bevel
-        float triRadius = 1.5 + bass * 0.08 * sin(i * 1.57 + iTime * 3.0);
+        // Equilateral triangle SDF
+        float triRadius = 1.5 + bass * 0.12 * sin(i * 1.57 + iTime * 3.0);
         float rawD = sdEquilateralTri(p, triRadius);
         float dWorld = abs(rawD);
         // Perspective-corrected screen-space distance for razor-sharp anti-aliased laser core at all depths
@@ -3423,8 +3389,233 @@ vec3 evalNeonTrianglePortal(vec2 uv) {
     col += evalNeonTrianglePortal(domainCoord) * ${mix.toFixed(2)};`,
 };
 
+export const kleinSphereLayer: ShaderLayerDefinition = {
+  id: 'kleinsphere',
+  name: '31. 3D Kleinian Sphere Packing',
+  shortName: 'Kleinian 3D',
+  description:
+    '90-step raymarched 3D Kleinian Inversion & Apollonian sphere-packing fractal (6 box-fold + sphere-inversion iterations) with orbital-trap iridescent cosine coloring, tetrahedral surface normals, step ambient occlusion, glowing 3D cyan rim lighting, and cosmic distance fog.',
+  mixUniform: 'uMixKleinSphere',
+  defaultMix: 1.0,
+  lfoMix: { freq: 0.21, phase: 0.5, min: 0.48, max: 1.0, decimals: 2 },
+  subParams: [
+    {
+      key: 'camDist',
+      uniformName: 'uKleinSphereCamDist',
+      label: 'Camera Distance',
+      min: 2.0,
+      max: 5.5,
+      step: 0.05,
+      defaultValue: 3.5,
+      format: (v) => v.toFixed(2),
+      lfo: { freq: 0.14, phase: 0.4, min: 2.8, max: 4.1, decimals: 2 },
+    },
+    {
+      key: 'orbitColor',
+      uniformName: 'uKleinSphereOrbitColor',
+      label: 'Orbital Iridescence',
+      min: 1.0,
+      max: 6.0,
+      step: 0.1,
+      defaultValue: 3.0,
+      format: (v) => `${v.toFixed(1)}x`,
+      lfo: { freq: 0.18, phase: 1.2, min: 2.2, max: 4.5, decimals: 1 },
+    },
+    {
+      key: 'rimGlow',
+      uniformName: 'uKleinSphereRimGlow',
+      label: '3D Cyan Rim Glow',
+      min: 0.3,
+      max: 3.0,
+      step: 0.05,
+      defaultValue: 1.5,
+      format: (v) => `${v.toFixed(2)}x`,
+      lfo: { freq: 0.22, phase: 2.1, min: 1.0, max: 2.4, decimals: 2 },
+    },
+  ],
+  glslFunction: `
+// Rotation matrix for camera/lattice movement
+mat2 kleinSphereRot(float a) {
+    float s = sin(a), c = cos(a);
+    return mat2(c, -s, s, c);
+}
+
+// Distance Estimator (DE) for the Kleinian Inversion / Sphere Packing fractal
+float kleinSphereMap(vec3 p, out float orbit) {
+    // Rotate slightly over time for dynamic view
+    p.xy = p.xy * kleinSphereRot(iTime * 0.05);
+    p.xz = p.xz * kleinSphereRot(iTime * 0.03);
+
+    vec3 offset = vec3(0.92, 1.15, 0.53);
+    float scale = 1.0;
+    orbit = 1e10;
+
+    // Iterative sphere inversions and box folds (Kleinian limit set / Apollonian packing)
+    for (int i = 0; i < 6; i++) {
+        // Box fold
+        p = 2.0 * clamp(p, -1.0, 1.0) - p;
+
+        // Sphere inversion
+        float r2 = max(dot(p, p), 0.0001);
+        orbit = min(orbit, r2);
+
+        float k = max(1.0 / r2, 1.0);
+        p *= k;
+        scale *= k;
+
+        // Translation
+        p += offset;
+    }
+
+    // Distance to the core spheres divided by accumulated scale
+    return (length(p) - 0.2) / scale;
+}
+
+// Standard normal calculation via tetrahedral gradient
+vec3 kleinSphereCalcNormal(vec3 p) {
+    float dummy = 0.0;
+    float h = 0.001;
+    vec2 k = vec2(1.0, -1.0);
+    return normalize(
+        k.xyy * kleinSphereMap(p + k.xyy * h, dummy) +
+        k.yyx * kleinSphereMap(p + k.yyx * h, dummy) +
+        k.yxy * kleinSphereMap(p + k.yxy * h, dummy) +
+        k.xxx * kleinSphereMap(p + k.xxx * h, dummy)
+    );
+}
+
+vec3 evalKleinSpherePacking(vec2 coord, float camDist, float orbitFreq, float rimGlow) {
+    float bass = clamp(uAudioSub * uAudioReactivity, 0.0, 2.0);
+    float high = clamp(uAudioHigh * uAudioReactivity, 0.0, 2.0);
+
+    vec2 uv = coord - uMouse * 0.15;
+
+    // Camera setup
+    vec3 ro = vec3(0.0, 0.0, -camDist);
+    vec3 rd = normalize(vec3(uv, 1.5));
+
+    // Raymarching loop
+    float t = 0.0;
+    float maxDist = 20.0;
+    float steps = 0.0;
+    float orbit = 0.0;
+    bool hit = false;
+
+    for (int i = 0; i < 90; i++) {
+        vec3 p = ro + rd * t;
+        float d = kleinSphereMap(p, orbit);
+
+        if (d < 0.001) {
+            hit = true;
+            break;
+        }
+        if (t > maxDist) {
+            break;
+        }
+        t += d * 0.8; // Safe step multiplier
+        steps = float(i);
+    }
+
+    vec3 bgCol = vec3(0.01, 0.015, 0.03); // Deep cosmic background
+    vec3 col = bgCol;
+
+    if (hit) {
+        vec3 p = ro + rd * t;
+        vec3 normal = kleinSphereCalcNormal(p);
+
+        // Lighting
+        vec3 lightDir = normalize(vec3(1.0, 2.0, -2.0));
+        float diff = max(dot(normal, lightDir), 0.0);
+        float amb = 0.5 + 0.5 * normal.y;
+
+        // Iridescent coloring based on orbital trap (highlights individual sphere layers)
+        vec3 sphereColor = 0.5 + 0.5 * cos(orbit * orbitFreq + vec3(0.0, 2.0, 4.0) + bass * 0.35);
+
+        // Combine lighting components
+        col = sphereColor * (diff * 0.8 + amb * 0.2);
+
+        // Ambient occlusion approximation based on raymarch steps
+        float ao = clamp(1.0 - steps / 90.0, 0.0, 1.0);
+        col *= ao;
+
+        // Rim lighting for a glowing 3D edge effect
+        float rim = 1.0 - max(dot(-rd, normal), 0.0);
+        col += vec3(0.1, 0.6, 1.0) * pow(rim, 3.0) * rimGlow * (1.0 + high * 0.3);
+    }
+
+    // Distance fog to blend into the background
+    col = mix(col, bgCol, 1.0 - exp(-0.08 * t * t));
+
+    // Tone mapping and gamma correction
+    col = col / (col + vec3(1.0));
+    col = pow(max(col, vec3(0.0)), vec3(0.4545));
+
+    return clamp(col, 0.0, 3.0);
+}
+`,
+  glslEvalExpr:
+    'evalKleinSpherePacking(domainCoord, uKleinSphereCamDist, uKleinSphereOrbitColor, uKleinSphereRimGlow)',
+  shadertoyHelper: (v) => {
+    const cd = (v.camDist ?? 3.5).toFixed(2);
+    const oc = (v.orbitColor ?? 3.0).toFixed(2);
+    const rg = (v.rimGlow ?? 1.5).toFixed(2);
+    return `// Layer 31: 3D Kleinian Sphere Packing (90-Step Raymarched Inversion Fractal)
+mat2 kleinSphereRot(float a) { float s = sin(a), c = cos(a); return mat2(c, -s, s, c); }
+float kleinSphereMap(vec3 p, out float orbit) {
+    p.xy = p.xy * kleinSphereRot(iTime * 0.05);
+    p.xz = p.xz * kleinSphereRot(iTime * 0.03);
+    vec3 offset = vec3(0.92, 1.15, 0.53);
+    float scale = 1.0; orbit = 1e10;
+    for (int i = 0; i < 6; i++) {
+        p = 2.0 * clamp(p, -1.0, 1.0) - p;
+        float r2 = max(dot(p, p), 0.0001);
+        orbit = min(orbit, r2);
+        float k = max(1.0 / r2, 1.0);
+        p *= k; scale *= k;
+        p += offset;
+    }
+    return (length(p) - 0.2) / scale;
+}
+vec3 kleinSphereCalcNormal(vec3 p) {
+    float dummy = 0.0, h = 0.001; vec2 k = vec2(1.0, -1.0);
+    return normalize(
+        k.xyy * kleinSphereMap(p + k.xyy * h, dummy) +
+        k.yyx * kleinSphereMap(p + k.yyx * h, dummy) +
+        k.yxy * kleinSphereMap(p + k.yxy * h, dummy) +
+        k.xxx * kleinSphereMap(p + k.xxx * h, dummy)
+    );
+}
+vec3 evalKleinSpherePacking(vec2 uv) {
+    vec3 ro = vec3(0.0, 0.0, -${cd}), rd = normalize(vec3(uv, 1.5));
+    float t = 0.0, steps = 0.0, orbit = 0.0; bool hit = false;
+    for (int i = 0; i < 90; i++) {
+        float d = kleinSphereMap(ro + rd * t, orbit);
+        if (d < 0.001) { hit = true; break; }
+        if (t > 20.0) break;
+        t += d * 0.8; steps = float(i);
+    }
+    vec3 bgCol = vec3(0.01, 0.015, 0.03), col = bgCol;
+    if (hit) {
+        vec3 p = ro + rd * t, normal = kleinSphereCalcNormal(p);
+        float diff = max(dot(normal, normalize(vec3(1.0, 2.0, -2.0))), 0.0);
+        float amb = 0.5 + 0.5 * normal.y;
+        vec3 sphereColor = 0.5 + 0.5 * cos(orbit * ${oc} + vec3(0.0, 2.0, 4.0));
+        col = sphereColor * (diff * 0.8 + amb * 0.2) * clamp(1.0 - steps / 90.0, 0.0, 1.0);
+        float rim = 1.0 - max(dot(-rd, normal), 0.0);
+        col += vec3(0.1, 0.6, 1.0) * pow(rim, 3.0) * ${rg};
+    }
+    col = mix(col, bgCol, 1.0 - exp(-0.08 * t * t));
+    col = col / (col + vec3(1.0));
+    return pow(max(col, vec3(0.0)), vec3(0.4545));
+}`;
+  },
+  shadertoyMain: (mix) =>
+    `    // Layer 31: 3D Kleinian Sphere Packing
+    col += evalKleinSpherePacking(domainCoord) * ${mix.toFixed(2)};`,
+};
+
 /**
- * Master Modular Shader Layer Registry (Ordered 01 through 30, unmasked full-viewport layers).
+ * Master Modular Shader Layer Registry (Ordered 01 through 31, unmasked full-viewport layers).
  */
 export const SHADER_LAYERS: ShaderLayerDefinition[] = [
   polarTunnelLayer,       // 01. Polar Harmonic Tunnel
@@ -3457,9 +3648,7 @@ export const SHADER_LAYERS: ShaderLayerDefinition[] = [
   ps2VlmLayer,            // 28. PS2 VLM Waveform Ribbon & Spectrum Horizon
   neonCorridorLayer,      // 29. Neon Crystal Ice Corridor
   neonTriangleLayer,      // 30. Rotating Neon Triangle Portal
+  kleinSphereLayer,       // 31. 3D Kleinian Sphere Packing
 ];
-
-
-
 
 

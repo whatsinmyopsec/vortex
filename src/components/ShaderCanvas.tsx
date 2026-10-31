@@ -95,8 +95,8 @@ void main() {
 `;
 
 /**
- * PlayStation 2 Virtual Light Machine (VLM) Temporal Feedback & Zoom-Smear Shader
- * Accumulates previous frames with radial zoom/rotation warp and slight chromatic trail dispersion.
+ * Post-Processing Shader: Temporal Motion Trails, Zoom-Smear, 5-Tap Chromatic Aberration & Vignette / Lens Breathing
+ * Accumulates previous frames with radial zoom/rotation warp, spectral RGB dispersion, and optical dark-corner lens breathing.
  */
 const PS2_FEEDBACK_FRAGMENT_SHADER_SOURCE = `
 precision highp float;
@@ -106,6 +106,10 @@ uniform vec2 iResolution;
 uniform float uPersistence;
 uniform float uZoomWarp;
 uniform float uRotWarp;
+uniform float uChromaticAberration;
+uniform float uVignetteBreathing;
+uniform float uTime;
+uniform float uBassPulse;
 uniform vec2 uCenterOffset;
 
 void main() {
@@ -114,21 +118,48 @@ void main() {
   vec2 aspect = vec2(res.x / res.y, 1.0);
 
   vec2 center = vec2(0.5) + uCenterOffset * vec2(res.y / res.x, 1.0) * 0.35;
-  vec2 d = (uv - center) * aspect;
+  vec2 radialVec = uv - center;
+  vec2 d = radialVec * aspect;
+  float radialDist = length(d);
 
-  // Radial zoom + subtle angular rotation warp for liquid PS2 VLM trails
+  // Optical Lens Breathing: subtle focal-length breathing with slow sine wave + bass kick pulse
+  float lensBreath = 0.0;
+  vec2 sampleUv = uv;
+  if (uVignetteBreathing > 0.001) {
+    lensBreath = uVignetteBreathing * (0.032 * sin(uTime * 1.15) - uBassPulse * 0.045);
+    sampleUv = clamp(center + radialVec * (1.0 + lensBreath), 0.0, 1.0);
+  }
+
+  // Radial zoom + subtle angular rotation warp for liquid motion trails
   float zoom = 1.0 - uZoomWarp;
   float c = cos(uRotWarp);
   float s = sin(uRotWarp);
   vec2 dWarped = mat2(c, -s, s, c) * (d * zoom);
   vec2 uvHist = center + dWarped / aspect;
 
-  // Subtle chromatic dispersion along the radial feedback vector
-  vec2 chromaStep = (uv - center) * (uZoomWarp * 0.32);
-  vec3 curr = texture2D(uTexCurrent, uv).rgb;
+  // 5-Tap Optical Spectral Prism Chromatic Aberration on current frame
+  vec3 curr;
+  if (uChromaticAberration > 0.001) {
+    vec2 caOffset = radialVec * (0.016 + 0.036 * radialDist * radialDist) * uChromaticAberration;
+    vec3 c0 = texture2D(uTexCurrent, clamp(sampleUv + caOffset * 1.0, 0.0, 1.0)).rgb;
+    vec3 c1 = texture2D(uTexCurrent, clamp(sampleUv + caOffset * 0.5, 0.0, 1.0)).rgb;
+    vec3 c2 = texture2D(uTexCurrent, sampleUv).rgb;
+    vec3 c3 = texture2D(uTexCurrent, clamp(sampleUv - caOffset * 0.5, 0.0, 1.0)).rgb;
+    vec3 c4 = texture2D(uTexCurrent, clamp(sampleUv - caOffset * 1.0, 0.0, 1.0)).rgb;
+    curr = vec3(
+      c0.r * 0.65 + c1.r * 0.35,
+      c1.g * 0.25 + c2.g * 0.50 + c3.g * 0.25,
+      c3.b * 0.35 + c4.b * 0.65
+    );
+  } else {
+    curr = texture2D(uTexCurrent, sampleUv).rgb;
+  }
+
+  // Chromatic dispersion along the radial feedback vector
+  vec2 chromaStep = radialVec * (uZoomWarp * 0.32 + uChromaticAberration * 0.014);
 
   vec3 hist = vec3(0.0);
-  if (uvHist.x >= 0.0 && uvHist.x <= 1.0 && uvHist.y >= 0.0 && uvHist.y <= 1.0) {
+  if (uPersistence > 0.001 && uvHist.x >= 0.0 && uvHist.x <= 1.0 && uvHist.y >= 0.0 && uvHist.y <= 1.0) {
     float hR = texture2D(uTexHistory, clamp(uvHist + chromaStep, 0.0, 1.0)).r;
     float hG = texture2D(uTexHistory, clamp(uvHist, 0.0, 1.0)).g;
     float hB = texture2D(uTexHistory, clamp(uvHist - chromaStep, 0.0, 1.0)).b;
@@ -139,7 +170,16 @@ void main() {
   // Hybrid optical screen + energy-conserving leaky integrator so trails glow without whiteout
   vec3 opticalMax = max(curr, hist * p);
   vec3 energyMix = curr * (1.0 - p * 0.58) + hist * p * 0.86;
-  vec3 outCol = clamp(mix(energyMix, opticalMax, 0.52), 0.0, 1.0);
+  vec3 outCol = p > 0.001 ? clamp(mix(energyMix, opticalMax, 0.52), 0.0, 1.0) : clamp(curr, 0.0, 1.0);
+
+  // Vignette & Lens Breathing (Dark Corners): anamorphic corner darkening + radial aperture breathing
+  if (uVignetteBreathing > 0.001) {
+    vec2 cornerVec = abs(uv - 0.5) * 2.0;
+    float cornerDist = length(pow(cornerVec, vec2(1.55))) * 0.78 + radialDist * 0.36;
+    float vigOuter = 1.26 - uVignetteBreathing * 0.46 + lensBreath * 1.65;
+    float vigMask = smoothstep(vigOuter, 0.22, cornerDist);
+    outCol *= mix(1.0, vigMask * vigMask, clamp(uVignetteBreathing * 1.15, 0.0, 1.0));
+  }
 
   gl_FragColor = vec4(outCol, 1.0);
 }
@@ -561,6 +601,10 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
         uPersistence: context.getUniformLocation(prog, 'uPersistence'),
         uZoomWarp: context.getUniformLocation(prog, 'uZoomWarp'),
         uRotWarp: context.getUniformLocation(prog, 'uRotWarp'),
+        uChromaticAberration: context.getUniformLocation(prog, 'uChromaticAberration'),
+        uVignetteBreathing: context.getUniformLocation(prog, 'uVignetteBreathing'),
+        uTime: context.getUniformLocation(prog, 'uTime'),
+        uBassPulse: context.getUniformLocation(prog, 'uBassPulse'),
         uCenterOffset: context.getUniformLocation(prog, 'uCenterOffset'),
       };
     };
@@ -663,13 +707,13 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
 
       accumulatedTime += dt * smoothedTimeScaleRef.current;
 
-      // 60 FPS fast-attack, elastic-release Kick & Bassline optical zoom envelope
+      // 60 FPS fast-attack, snappy elastic-release Kick & Bassline optical zoom envelope
       const rawKickEnv =
         !isPausedRef.current && bands.isPlaying && bands.reactivity > 0
-          ? (bands.kickZoom ?? bands.sub * 0.75) *
-            Math.min(1.6, Math.max(0.35, bands.reactivity))
+          ? (bands.kickZoom ?? bands.sub * 0.95) *
+            Math.min(1.8, Math.max(0.45, bands.reactivity))
           : 0.0;
-      const zoomRate = rawKickEnv > smoothedBassZoomRef.current ? 28.0 : 6.8;
+      const zoomRate = rawKickEnv > smoothedBassZoomRef.current ? 38.0 : 9.5;
       smoothedBassZoomRef.current +=
         (rawKickEnv - smoothedBassZoomRef.current) * (1.0 - Math.exp(-dt * zoomRate));
       if (smoothedBassZoomRef.current < 0.001 && rawKickEnv === 0) {
@@ -773,10 +817,10 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
           gl.uniform1f(core.uPs2ColorMatrix, passState.ps2ColorMatrix ?? 0.0);
 
           // Bind real-time Web Audio frequency band uniforms + Kick/Bassline Optical Zoom
-          const punchStrength = passState.bassZoomPunch ?? 0.45;
+          const punchStrength = passState.bassZoomPunch ?? 1.15;
           const effectiveBassZoom = Math.min(
-            1.25,
-            Math.max(0.0, smoothedBassZoomRef.current * punchStrength * 0.68)
+            2.8,
+            Math.max(0.0, smoothedBassZoomRef.current * punchStrength)
           );
           gl.uniform1f(core.uAudioSub, bands.sub);
           gl.uniform1f(core.uAudioMid, bands.mid);
@@ -889,16 +933,26 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
           }
         };
 
-        // Determine effective trail persistence (interpolated during preset crossfades)
+        // Determine effective post-processing parameters (interpolated during preset crossfades)
         const baseTrail = s.trailPersistence ?? 0.0;
         const fromTrail = activeFade ? (activeFade.fromState.trailPersistence ?? 0.0) : baseTrail;
+        const baseChroma = s.chromaticAberration ?? 0.0;
+        const fromChroma = activeFade
+          ? (activeFade.fromState.chromaticAberration ?? 0.0)
+          : baseChroma;
+        const baseVignette = s.vignetteBreathing ?? 0.0;
+        const fromVignette = activeFade
+          ? (activeFade.fromState.vignetteBreathing ?? 0.0)
+          : baseVignette;
         const fadeEase = activeFade
           ? 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, Math.max(0, rawProgress)))
           : 1.0;
         const effectiveTrail = fromTrail + (baseTrail - fromTrail) * fadeEase;
+        const effectiveChroma = fromChroma + (baseChroma - fromChroma) * fadeEase;
+        const effectiveVignette = fromVignette + (baseVignette - fromVignette) * fadeEase;
 
         if (
-          effectiveTrail > 0.01 &&
+          (effectiveTrail > 0.005 || effectiveChroma > 0.005 || effectiveVignette > 0.005) &&
           feedbackProgram &&
           feedbackUniforms &&
           ensureHistoryFbos(gl, canvas.width, canvas.height)
@@ -911,16 +965,24 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
           const writeTex = histPingPong === 0 ? texHistB : texHistA;
 
           const baseZoomWarp = s.trailZoomWarp ?? 0.009;
-          const punchStrength = s.bassZoomPunch ?? 0.45;
+          const punchStrength = s.bassZoomPunch ?? 1.15;
           const audioZoomPulse =
             bands.isPlaying && bands.reactivity > 0
-              ? baseZoomWarp * (1.0 + bands.sub * 0.55 + bands.beatPulse * 0.35) +
-                smoothedBassZoomRef.current * punchStrength * 0.018
+              ? baseZoomWarp * (1.0 + bands.sub * 0.75 + bands.beatPulse * 0.55) +
+                smoothedBassZoomRef.current * punchStrength * 0.038
               : baseZoomWarp;
+          const audioChromaBoost =
+            bands.isPlaying && bands.reactivity > 0 && effectiveChroma > 0.005
+              ? effectiveChroma * (1.0 + smoothedBassZoomRef.current * 0.35 + bands.beatPulse * 0.18)
+              : effectiveChroma;
+          const bassPulseVal =
+            bands.isPlaying && bands.reactivity > 0
+              ? smoothedBassZoomRef.current * 0.75 + bands.beatPulse * 0.35
+              : 0.0;
           const rotWarp =
             0.0025 * Math.sin(accumulatedTime * 0.45) * (s.swirlTwist >= 0 ? 1.0 : -1.0);
 
-          // 2. Run PS2 VLM Temporal Feedback pass into writeFbo
+          // 2. Run Post-Processing pass (Temporal Feedback, Chromatic Aberration & Vignette/Lens Breathing) into writeFbo
           gl.bindFramebuffer(gl.FRAMEBUFFER, writeFbo);
           gl.viewport(0, 0, histWidth, histHeight);
           gl.useProgram(feedbackProgram);
@@ -941,6 +1003,10 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
           gl.uniform1f(feedbackUniforms.uPersistence, effectiveTrail);
           gl.uniform1f(feedbackUniforms.uZoomWarp, audioZoomPulse);
           gl.uniform1f(feedbackUniforms.uRotWarp, rotWarp);
+          gl.uniform1f(feedbackUniforms.uChromaticAberration, audioChromaBoost);
+          gl.uniform1f(feedbackUniforms.uVignetteBreathing, effectiveVignette);
+          gl.uniform1f(feedbackUniforms.uTime, accumulatedTime);
+          gl.uniform1f(feedbackUniforms.uBassPulse, bassPulseVal);
           gl.uniform2f(
             feedbackUniforms.uCenterOffset,
             currentMouseRef.current.x,
@@ -994,7 +1060,7 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
           isPressed: isPointerDownRef.current,
           shaderTimeScale: smoothedTimeScaleRef.current,
           bassZoomLevel:
-            smoothedBassZoomRef.current * (s.bassZoomPunch ?? 0.45),
+            smoothedBassZoomRef.current * (s.bassZoomPunch ?? 1.15),
         });
       }
 

@@ -11,7 +11,7 @@ import {
 } from './types';
 
 const DEFAULT_INITIAL_LAYER_MIXES: Record<string, number> = {
-  neontriangle: 1.0,
+  kleinsphere: 1.0,
 };
 
 /**
@@ -41,6 +41,7 @@ export function buildDefaultLayerOrder(
   layers: ShaderLayerDefinition[] = SHADER_LAYERS
 ): string[] {
   const priorityIds = [
+    'kleinsphere',
     'neontriangle',
     'neoncorridor',
     'klein4d',
@@ -84,7 +85,9 @@ export const DEFAULT_SHADER_STATE: ShaderState = {
   trailZoomWarp: 0.009,
   crtScanlines: 0.0,
   ps2ColorMatrix: 0.0,
-  bassZoomPunch: 0.45,
+  chromaticAberration: 0.0,
+  vignetteBreathing: 0.0,
+  bassZoomPunch: 1.15,
   layerOrder: buildDefaultLayerOrder(SHADER_LAYERS),
   layers: buildDefaultLayersState(SHADER_LAYERS),
 };
@@ -110,6 +113,8 @@ function withLayerOverrides(
     trailZoomWarp?: number;
     crtScanlines?: number;
     ps2ColorMatrix?: number;
+    chromaticAberration?: number;
+    vignetteBreathing?: number;
     bassZoomPunch?: number;
     layerOrder?: string[];
     mixes: Record<string, number>;
@@ -157,7 +162,9 @@ function withLayerOverrides(
     trailZoomWarp: overrides.trailZoomWarp ?? 0.009,
     crtScanlines: overrides.crtScanlines ?? 0.0,
     ps2ColorMatrix: overrides.ps2ColorMatrix ?? 0.0,
-    bassZoomPunch: overrides.bassZoomPunch ?? base.bassZoomPunch ?? 0.45,
+    chromaticAberration: overrides.chromaticAberration ?? 0.0,
+    vignetteBreathing: overrides.vignetteBreathing ?? 0.0,
+    bassZoomPunch: overrides.bassZoomPunch ?? base.bassZoomPunch ?? 1.15,
     layerOrder: finalOrder,
     layers: nextLayers,
   };
@@ -178,7 +185,7 @@ export const SHADER_PRESETS: PresetItem[] = [
       '82% Temporal Trail Smear',
       'PS2 BIOS Towers #1',
       '7-Orb Comet Trails',
-      'Y2K Cobalt Matrix',
+      'Chromatic Prism 38%',
     ],
     apply: (base) =>
       withLayerOverrides(base, {
@@ -196,6 +203,8 @@ export const SHADER_PRESETS: PresetItem[] = [
         trailZoomWarp: 0.009,
         crtScanlines: 0.32,
         ps2ColorMatrix: 0.85,
+        chromaticAberration: 0.38,
+        vignetteBreathing: 0.42,
         layerOrder: ['ps2bios', 'ps2vlm', 'cherenkov', 'starfield'],
         mixes: {
           ps2bios: 0.96,
@@ -221,7 +230,7 @@ export const SHADER_PRESETS: PresetItem[] = [
     mechanics: [
       '86% VLM Frame Feedback',
       '3D Waveform Ribbons',
-      '28-Band Radial EQ',
+      'Chromatic Prism 48%',
       'Trinitron Phosphor',
     ],
     apply: (base) =>
@@ -240,6 +249,7 @@ export const SHADER_PRESETS: PresetItem[] = [
         trailZoomWarp: 0.013,
         crtScanlines: 0.36,
         ps2ColorMatrix: 0.72,
+        chromaticAberration: 0.48,
         layerOrder: ['ps2vlm', 'lissajous', 'klein4d', 'tunnel'],
         mixes: {
           ps2vlm: 0.98,
@@ -264,7 +274,7 @@ export const SHADER_PRESETS: PresetItem[] = [
     mechanics: [
       '88% Liquid Persistence',
       'Inward Zoom Smear',
-      'Cobalt-Indigo Grade',
+      'Chromatic Prism 54%',
       'Beat-Reactive Surge',
     ],
     apply: (base) =>
@@ -283,6 +293,7 @@ export const SHADER_PRESETS: PresetItem[] = [
         trailZoomWarp: -0.011,
         crtScanlines: 0.28,
         ps2ColorMatrix: 0.9,
+        chromaticAberration: 0.54,
         layerOrder: ['ps2vlm', 'ps2bios', 'kifscrystal', 'accretion'],
         mixes: {
           ps2vlm: 0.92,
@@ -308,7 +319,7 @@ export const SHADER_PRESETS: PresetItem[] = [
       '3D Polar Wrapping',
       'Trinitron CRT 48%',
       '78% Motion Trails',
-      'Sapphire Tunnel',
+      'Chromatic Prism 42%',
     ],
     apply: (base) =>
       withLayerOverrides(base, {
@@ -326,6 +337,7 @@ export const SHADER_PRESETS: PresetItem[] = [
         trailZoomWarp: 0.012,
         crtScanlines: 0.48,
         ps2ColorMatrix: 0.8,
+        chromaticAberration: 0.42,
         layerOrder: ['ps2bios', 'truchet', 'ps2vlm', 'tunnel'],
         mixes: {
           ps2bios: 0.94,
@@ -350,7 +362,7 @@ export const SHADER_PRESETS: PresetItem[] = [
     mechanics: [
       '84% Motion Trails',
       'Layer 30 Neon Triangles',
-      'PS2 VLM Oscilloscope',
+      'Chromatic Prism 45%',
       'Trinitron Scanlines 30%',
     ],
     apply: (base) =>
@@ -369,6 +381,7 @@ export const SHADER_PRESETS: PresetItem[] = [
         trailZoomWarp: 0.01,
         crtScanlines: 0.3,
         ps2ColorMatrix: 0.35,
+        chromaticAberration: 0.45,
         layerOrder: ['neontriangle', 'ps2vlm', 'ps2bios', 'starfield'],
         mixes: {
           neontriangle: 0.96,
@@ -398,7 +411,7 @@ export const SHADER_PRESETS: PresetItem[] = [
       'Layer 29 Ice Corridor',
       'PS2 7-Orb Constellation',
       '76% Temporal Smear',
-      'Cobalt-Amethyst Grade',
+      'Chromatic Prism 36%',
     ],
     apply: (base) =>
       withLayerOverrides(base, {
@@ -413,6 +426,7 @@ export const SHADER_PRESETS: PresetItem[] = [
         trailZoomWarp: 0.008,
         crtScanlines: 0.24,
         ps2ColorMatrix: 0.45,
+        chromaticAberration: 0.36,
         layerOrder: ['neoncorridor', 'ps2bios', 'ps2vlm', 'starfield'],
         mixes: {
           neoncorridor: 0.94,
@@ -435,6 +449,237 @@ export const SHADER_PRESETS: PresetItem[] = [
   // ============================================================================
   // NEW LAYERS & NEGATIVE-SPACE CASCADES
   // ============================================================================
+  {
+    id: 'seahorse-mandelbrot-klein4d-kifs-starfield',
+    name: 'Seahorse Valley & 4D Kleinian Spheres → 3D KIFS Crystal → Starfield',
+    subtitle:
+      '#1 4D Kleinian Pure Spheres & #2 Seahorse Valley Mandelbrot (-0.7436, 0.1318) framing #3 3D KIFS Crystal diagonal facets and #4 Orbital Starfield in the dark cardioid lobes',
+    badge: 'Seahorse + 4D Spheres → KIFS → Stars',
+    category: 'new-layers',
+    mechanics: [
+      'Seahorse Valley Zoom',
+      'Pure 4D Spheres',
+      '3D KIFS Diagonal Band',
+      'Starfield Lobes',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.15,
+        swirlTwist: 0.9,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.95,
+        negativeSpaceThreshold: 0.25,
+        bassZoomPunch: 1.35,
+        layerOrder: ['klein4d', 'mandelbrot', 'kifscrystal', 'starfield'],
+        mixes: {
+          klein4d: 0.98,
+          mandelbrot: 0.88,
+          kifscrystal: 0.82,
+          starfield: 0.6,
+        },
+        subValues: {
+          klein4d: { invScale: 10.2, speed: 0.28 },
+          mandelbrot: { baseZoom: 0.28, audioPull: 1.45 },
+          kifscrystal: { camDist: 3.3, scale: 2.02 },
+        },
+      }),
+  },
+  {
+    id: 'seahorse-valley-mandelbrot-showcase-21',
+    name: '21. Seahorse Valley Mandelbrot → 3D KIFS Crystal → Apollonian → Starfield',
+    subtitle:
+      '#1 Tight 0.24x Seahorse Valley Mandelbrot zoom (-0.74364388, 0.1318259) whose dark cardioid lobes reveal #2 3D KIFS Crystal, #3 Apollonian Gasket, and #4 Orbital Starfield',
+    badge: 'Layer 21 · Seahorse Valley Mandelbrot',
+    category: 'new-layers',
+    mechanics: [
+      '0.24x Seahorse Zoom',
+      'Sub-Bass Zoom Pull',
+      '3D KIFS Crystal Core',
+      'Neg-Space 97%',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.15,
+        swirlTwist: 0.9,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.97,
+        negativeSpaceThreshold: 0.23,
+        bassZoomPunch: 1.35,
+        layerOrder: ['mandelbrot', 'kifscrystal', 'apollonian', 'starfield'],
+        mixes: {
+          mandelbrot: 0.98,
+          kifscrystal: 0.92,
+          apollonian: 0.82,
+          starfield: 0.6,
+        },
+        subValues: {
+          mandelbrot: { baseZoom: 0.24, audioPull: 1.45 },
+          kifscrystal: { camDist: 2.95, scale: 2.12 },
+          apollonian: { scale: 1.85, fold: 1.34 },
+        },
+      }),
+  },
+  {
+    id: 'klein4d-pure-spheres-26',
+    name: '26. 4D Kleinian Inversion Lattice (Pure Spheres — No Lines)',
+    subtitle:
+      '80-step 4D raymarched spherical inversion lattice with line/cylinder metrics removed (d2 = length(p) - 0.28, d4 = length(p.xw) - 0.2, k = 10.2 / dot(p,p)) and hyperbolic tanh tone-mapping',
+    badge: 'Layer 26 · Pure 4D Spheres',
+    category: 'new-layers',
+    mechanics: [
+      'Pure 4D Spheres Only',
+      'k = 10.2 / dot(p,p)',
+      '80-Step 4D Raymarch',
+      'Neg-Space 95% (0.25)',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.1,
+        swirlTwist: 0.85,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.95,
+        negativeSpaceThreshold: 0.25,
+        layerOrder: ['klein4d', 'starfield'],
+        mixes: {
+          klein4d: 0.9,
+        },
+        subValues: {
+          klein4d: {
+            invScale: 10.2,
+            speed: 0.28,
+          },
+        },
+      }),
+  },
+  {
+    id: 'klein-sphere-packing-31',
+    name: '31. 3D Kleinian Sphere Packing (Raymarched Orbital Inversion)',
+    subtitle:
+      '90-step raymarched 3D Kleinian Inversion & Apollonian sphere-packing fractal (6 box-fold + sphere-inversion iterations) with orbital-trap iridescent coloring, tetrahedral surface normals, step AO, and 3D cyan rim glow',
+    badge: 'Layer 31 · 3D Kleinian Spheres',
+    category: 'new-layers',
+    mechanics: [
+      '90-Step 3D Raymarch',
+      '6-Fold Sphere Inversion',
+      'Orbital Iridescence',
+      '3D Cyan Rim Glow',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 0.95,
+        swirlTwist: 0.6,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.92,
+        negativeSpaceThreshold: 0.22,
+        bassZoomPunch: 1.25,
+        layerOrder: ['kleinsphere', 'starfield'],
+        mixes: {
+          kleinsphere: 1.0,
+        },
+        subValues: {
+          kleinsphere: {
+            camDist: 3.5,
+            orbitColor: 3.0,
+            rimGlow: 1.5,
+          },
+        },
+      }),
+  },
+  {
+    id: 'klein-sphere-neon-triangle-cascade-31-30',
+    name: '31. 3D Kleinian Spheres → 30. Rotating Neon Triangles → 03. Starfield',
+    subtitle:
+      '#1 Layer 31 (3D Kleinian Sphere Packing) suspended in foreground while its deep cosmic background and fog pockets reveal #2 Layer 30 (Rotating Neon Triangle Portal) and #3 Layer 03 (Orbital Starfield)',
+    badge: 'Layers 31 → 30 → 03 Cascade',
+    category: 'new-layers',
+    mechanics: [
+      'Layer 31 3D Kleinian',
+      'Layer 30 Neon Triangles',
+      'Neg-Space 94%',
+      'Pan & Zoom Ready',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.05,
+        swirlTwist: 0.75,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.94,
+        negativeSpaceThreshold: 0.24,
+        bassZoomPunch: 1.35,
+        layerOrder: ['kleinsphere', 'neontriangle', 'starfield'],
+        mixes: {
+          kleinsphere: 0.96,
+          neontriangle: 0.9,
+          starfield: 0.65,
+        },
+        subValues: {
+          kleinsphere: {
+            camDist: 3.45,
+            orbitColor: 3.2,
+            rimGlow: 1.65,
+          },
+          neontriangle: {
+            twistRate: 1.1,
+            crispness: 1.6,
+            floorReflect: 1.0,
+          },
+        },
+      }),
+  },
+  {
+    id: 'klein-sphere-ice-corridor-bass-zoom-31-29',
+    name: 'Bass Pan & Zoom: 31. 3D Kleinian Spheres → 29. Ice Corridor → 26. 4D Kleinian',
+    subtitle:
+      'High-impact Bass Pan & Zoom rig combining #1 3D Kleinian Sphere Packing with #2 Neon Crystal Ice Corridor and #3 4D Kleinian Lattice in the dark cosmic background',
+    badge: 'Bass Pan & Zoom · Layers 31 → 29 → 26',
+    category: 'new-layers',
+    mechanics: [
+      'Bass Pan & Zoom 1.65x',
+      'Layer 31 3D Spheres',
+      'Layer 29 Ice Corridor',
+      'Layer 26 4D Lattice',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.1,
+        swirlTwist: 0.8,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.93,
+        negativeSpaceThreshold: 0.24,
+        bassZoomPunch: 1.65,
+        layerOrder: ['kleinsphere', 'neoncorridor', 'klein4d', 'starfield'],
+        mixes: {
+          kleinsphere: 0.96,
+          neoncorridor: 0.88,
+          klein4d: 0.8,
+          starfield: 0.55,
+        },
+        subValues: {
+          kleinsphere: {
+            camDist: 3.35,
+            orbitColor: 3.4,
+            rimGlow: 1.75,
+          },
+          neoncorridor: {
+            portalSpacing: 1.85,
+            rockRelief: 1.2,
+            neonBloom: 1.35,
+          },
+        },
+      }),
+  },
   {
     id: 'rotating-neon-triangle-portal-30',
     name: '30. Rotating Neon Triangle Portal (Ultra-Crisp Plasma & Floor)',
@@ -646,14 +891,14 @@ export const SHADER_PRESETS: PresetItem[] = [
   },
   {
     id: 'sub-bass-triangle-corridor-mandelbrot-rig',
-    name: 'Audio Bass Portal: 30. Neon Triangles → 29. Ice Corridor → 21. Mandelbrot → 20. Cherenkov',
+    name: 'Bass Zoom Portal: 30. Neon Triangles → 29. Ice Corridor → 21. Mandelbrot',
     subtitle:
-      'High-impact audio-reactive rig where sub-bass drives #1 Rotating Neon Triangles, #2 3D Crystal Ice Corridor, #3 Seahorse Mandelbrot Zoom, and #4 Cherenkov Hex Shockwaves',
-    badge: 'Audio Rig · 30 → 29 → 21 → 20',
+      'High-impact Bass Zoom rig (120% Punch) where kicks & basslines surge #1 Rotating Neon Triangles, #2 3D Crystal Ice Corridor, #3 Seahorse Mandelbrot Zoom, and #4 Cherenkov Hex Shockwaves',
+    badge: 'Bass Zoom 120% · 30 → 29 → 21 → 20',
     category: 'audio-reactive',
     mechanics: [
+      '120% Bass Zoom Punch',
       'Sub-Bass Portal Surge',
-      'Gravity Ripple Mode',
       '160% Mandelbrot Pull',
       'Cherenkov Hex Pulse',
     ],
@@ -666,6 +911,7 @@ export const SHADER_PRESETS: PresetItem[] = [
         layerCoordSpace: 0,
         negativeSpaceFill: 0.94,
         negativeSpaceThreshold: 0.25,
+        bassZoomPunch: 1.45,
         layerOrder: [
           'neontriangle',
           'neoncorridor',
@@ -693,6 +939,202 @@ export const SHADER_PRESETS: PresetItem[] = [
           },
           mandelbrot: { baseZoom: 0.44, audioPull: 1.6 },
           cherenkov: { hexScale: 10.0, pulseSpeed: 1.65 },
+        },
+      }),
+  },
+  {
+    id: 'bass-zoom-neon-triangle-hyperdrive',
+    name: 'Bass Zoom Overdrive: 30. Rotating Neon Triangles + 28. VLM Wave',
+    subtitle:
+      'Dedicated 150% Bassline & Kick Zoom rig: every bass note and kick drum physically rockets the 20-ring Neon Triangle corridor forward with 78% temporal zoom smear and VLM waveform ribbons',
+    badge: 'Bass Zoom 150% · Triangle Overdrive',
+    category: 'audio-reactive',
+    mechanics: [
+      '150% Bass Zoom Punch',
+      '3D Camera Z-Surge',
+      '78% Temporal Zoom Trail',
+      'VLM Waveform Ribbon',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.15,
+        swirlTwist: 0.85,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.92,
+        negativeSpaceThreshold: 0.24,
+        trailPersistence: 0.78,
+        trailZoomWarp: 0.014,
+        bassZoomPunch: 1.5,
+        layerOrder: ['neontriangle', 'ps2vlm', 'starfield'],
+        mixes: {
+          neontriangle: 1.0,
+          ps2vlm: 0.78,
+          starfield: 0.65,
+        },
+        subValues: {
+          neontriangle: {
+            twistRate: 1.2,
+            crispness: 1.85,
+            floorReflect: 1.2,
+          },
+          ps2vlm: { waveAmp: 1.45, bandCount: 24.0, ribbonGlow: 1.5 },
+          starfield: { speed: 1.25, size: 0.055 },
+        },
+      }),
+  },
+  {
+    id: 'bass-zoom-crystal-cave-cathedral',
+    name: 'Bass Zoom Ice Cave: 29. Neon Crystal Corridor + 24. KIFS Crystal',
+    subtitle:
+      '145% Bassline & Kick Zoom through the 3D raymarched Neon Crystal Ice Corridor while #2 3D KIFS Crystal expands and contracts inside the amethyst rock shadows on every bass groove',
+    badge: 'Bass Zoom 145% · 3D Ice Corridor',
+    category: 'audio-reactive',
+    mechanics: [
+      '145% Bass Zoom Punch',
+      '3D Cave Z-Warp',
+      'KIFS Camera Zoom',
+      'Wet Crystal Normals',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.15,
+        swirlTwist: 0.8,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.93,
+        negativeSpaceThreshold: 0.24,
+        bassZoomPunch: 1.45,
+        layerOrder: ['neoncorridor', 'kifscrystal', 'starfield'],
+        mixes: {
+          neoncorridor: 0.98,
+          kifscrystal: 0.82,
+          starfield: 0.65,
+        },
+        subValues: {
+          neoncorridor: {
+            portalSpacing: 1.8,
+            rockRelief: 1.2,
+            neonBloom: 1.45,
+          },
+          kifscrystal: { camDist: 3.2, scale: 2.04 },
+          starfield: { speed: 1.15, size: 0.05 },
+        },
+      }),
+  },
+  {
+    id: 'bass-zoom-klein4d-kifs-reactor',
+    name: 'Bass Zoom 4D Reactor: 26. 4D Kleinian → 24. 3D KIFS → 20. Cherenkov',
+    subtitle:
+      '145% Bassline & Kick Zoom driving the 80-step 4D Kleinian spherical inversion camera and 3D KIFS octahedral crystal with Cherenkov hex shockwaves firing in the cavities',
+    badge: 'Bass Zoom 145% · 4D Kleinian Reactor',
+    category: 'audio-reactive',
+    mechanics: [
+      '145% Bass Zoom Punch',
+      '4D Camera Bass Surge',
+      '3D KIFS Breathing',
+      'Cherenkov Hex Pulse',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 2,
+        distortionStrength: 1.25,
+        swirlTwist: 1.0,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.94,
+        negativeSpaceThreshold: 0.25,
+        bassZoomPunch: 1.45,
+        layerOrder: ['klein4d', 'kifscrystal', 'cherenkov', 'starfield'],
+        mixes: {
+          klein4d: 0.98,
+          kifscrystal: 0.86,
+          cherenkov: 0.82,
+          starfield: 0.55,
+        },
+        subValues: {
+          klein4d: { invScale: 10.2, speed: 0.3 },
+          kifscrystal: { camDist: 3.15, scale: 2.05 },
+          cherenkov: { hexScale: 10.5, pulseSpeed: 1.7 },
+        },
+      }),
+  },
+  {
+    id: 'bass-zoom-ps2-bios-sub-monoliths',
+    name: 'Bass Zoom PS2 Monoliths: 27. PS2 Towers → 30. Neon Triangles → 28. VLM',
+    subtitle:
+      '140% Bassline & Kick Zoom plunging into the PS2 BIOS monolithic crystal towers with #2 Rotating Neon Triangles and #3 VLM waveform ribbons in 82% temporal feedback',
+    badge: 'Bass Zoom 140% · PS2 Towers + Triangles',
+    category: 'audio-reactive',
+    mechanics: [
+      '140% Bass Zoom Punch',
+      'PS2 Tower Camera Dive',
+      '82% Temporal Feedback',
+      'Neon Triangle Core',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.15,
+        swirlTwist: 0.95,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.9,
+        negativeSpaceThreshold: 0.23,
+        trailPersistence: 0.82,
+        trailZoomWarp: 0.012,
+        ps2ColorMatrix: 0.55,
+        bassZoomPunch: 1.4,
+        layerOrder: ['ps2bios', 'neontriangle', 'ps2vlm', 'starfield'],
+        mixes: {
+          ps2bios: 0.95,
+          neontriangle: 0.88,
+          ps2vlm: 0.8,
+          starfield: 0.7,
+        },
+        subValues: {
+          ps2bios: { density: 5.5, orbGlow: 1.65, fogDepth: 1.3 },
+          neontriangle: { twistRate: 1.15, crispness: 1.75, floorReflect: 0.95 },
+          ps2vlm: { waveAmp: 1.45, bandCount: 24.0, ribbonGlow: 1.5 },
+        },
+      }),
+  },
+  {
+    id: 'bass-zoom-julia-ferrofluid-vortex',
+    name: 'Bass Zoom Liquid Fractal: 08. 400-Iter Julia → 11. Ferrofluid → 05. Accretion',
+    subtitle:
+      '140% Bassline & Kick Zoom lens-pinching into #1 400-Iteration Julia fractal filaments, #2 Iridescent Ferrofluid Oil, and #3 Event Horizon Accretion ring',
+    badge: 'Bass Zoom 140% · Julia → Ferrofluid',
+    category: 'audio-reactive',
+    mechanics: [
+      '140% Bass Zoom Punch',
+      'Optical FOV Pinch',
+      '400-Iter Julia Filaments',
+      'Thin-Film Ferrofluid',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.35,
+        swirlTwist: 1.15,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.93,
+        negativeSpaceThreshold: 0.24,
+        bassZoomPunch: 1.4,
+        layerOrder: ['julia', 'liquidoil', 'accretion', 'starfield'],
+        mixes: {
+          julia: 0.95,
+          liquidoil: 0.88,
+          accretion: 0.85,
+          starfield: 0.6,
+        },
+        subValues: {
+          julia: { zoom: 2.05, morph: 0.26 },
+          liquidoil: { density: 4.0, viscosity: 1.3, iridescence: 5.2 },
+          accretion: { radius: 0.2, spin: 1.4 },
         },
       }),
   },
@@ -831,7 +1273,7 @@ export const SHADER_PRESETS: PresetItem[] = [
           starfield: 0.78,
         },
         subValues: {
-          klein4d: { invScale: 10.0, speed: 0.25 },
+          klein4d: { invScale: 10.2, speed: 0.28 },
           kaleidoscope: { folds: 8.0, zoom: 1.45, morph: 1.0 },
           starfield: { speed: 1.0, size: 0.05 },
         },
@@ -841,10 +1283,10 @@ export const SHADER_PRESETS: PresetItem[] = [
     id: 'klein4d-inversion-cathedral',
     name: '4D Kleinian Lattice → 400-Iter Julia → 3D KIFS Crystal',
     subtitle:
-      '#1 80-step 4D raymarched Kleinian spherical inversion lattice whose dark 4D polytope cavities reveal #2 400-Iteration Julia filaments and #3 3D KIFS Crystal',
+      '#1 80-step 4D raymarched Kleinian spherical inversion lattice (Pure Spheres) whose dark 4D cavities reveal #2 400-Iteration Julia filaments and #3 3D KIFS Crystal',
     badge: '#1 4D Kleinian → #2 Julia (400) → #3 KIFS',
     category: 'new-layers',
-    mechanics: ['80-Step 4D Raymarch', 'Neg-Space 94%', '4D Mouse Rotations', 'Optical Glow'],
+    mechanics: ['80-Step 4D Raymarch', 'Neg-Space 94%', 'Pure 4D Spheres', 'Optical Glow'],
     apply: (base) =>
       withLayerOverrides(base, {
         distortionMode: 0,
@@ -862,7 +1304,7 @@ export const SHADER_PRESETS: PresetItem[] = [
           starfield: 0.5,
         },
         subValues: {
-          klein4d: { invScale: 10.0, speed: 0.25 },
+          klein4d: { invScale: 10.2, speed: 0.28 },
           julia: { zoom: 2.05, morph: 0.24 },
           kifscrystal: { camDist: 3.3, scale: 2.02 },
         },
@@ -872,7 +1314,7 @@ export const SHADER_PRESETS: PresetItem[] = [
     id: 'klein4d-pure-hyper-journey',
     name: '4D Kleinian Hyper-Tunnel → Log Spiral → Circle Packing',
     subtitle:
-      'Showcases the new #1 4D Kleinian Inversion Lattice (k = 10 / dot(p,p)) at full intensity with subtle #2 Log Spiral Vortex and #3 Circle Packing in deep negative space',
+      'Showcases the Pure Spheres #1 4D Kleinian Inversion Lattice (k = 10.2 / dot(p,p)) at full intensity with subtle #2 Log Spiral Vortex and #3 Circle Packing in deep negative space',
     badge: '#1 4D Kleinian Solo + Spiral Void Fill',
     category: 'new-layers',
     mechanics: ['80-Step 4D Lattice', 'Tanh HDR Tone-Map', 'Neg-Space 96%', 'Linear Mix'],
@@ -892,7 +1334,7 @@ export const SHADER_PRESETS: PresetItem[] = [
           circlepacking: 0.65,
         },
         subValues: {
-          klein4d: { invScale: 10.0, speed: 0.25 },
+          klein4d: { invScale: 10.2, speed: 0.28 },
           logspiralvortex: { arms: 3.0, foldFreq: 4.0 },
           circlepacking: { scale: 1.4, drift: 0.25 },
         },
@@ -900,10 +1342,10 @@ export const SHADER_PRESETS: PresetItem[] = [
   },
   {
     id: 'audio-mandelbrot-seahorse-zoom',
-    name: 'Audio Mandelbrot → 400-Iter Julia → Circle Packing',
+    name: 'Seahorse Mandelbrot Zoom → 400-Iter Julia → Circle Packing',
     subtitle:
       '#1 Mandelbrot Seahorse zoom whose dark interior bulbs and outer void are filled by #2 400-Iteration Julia Set and #3 Recursive Circle Packing',
-    badge: '#1 Mandelbrot → #2 Julia → #3 Packing',
+    badge: '#1 Seahorse Mandelbrot → #2 Julia → #3 Packing',
     category: 'new-layers',
     mechanics: ['Neg-Space 94%', 'Sub-Bass Zoom Pull', '400-Iter Julia', '2D Planar'],
     apply: (base) =>
@@ -1562,12 +2004,12 @@ export const SHADER_PRESETS: PresetItem[] = [
   // ============================================================================
   {
     id: 'astral-drift-sub-bass-mandelbrot',
-    name: 'Astral Drift Rig: Sub-Bass Mandelbrot → Cherenkov → KIFS',
+    name: 'Bass Zoom Astral Drift: 21. Sub-Bass Mandelbrot → 20. Cherenkov → 24. KIFS',
     subtitle:
-      'Tuned for heavy sub-bass & crunchy tones: #1 Mandelbrot with 165% Audio Sub-Bass Zoom Pull & Kick Flash over #2 Cherenkov Hex Shockwaves and #3 3D KIFS Crystal',
-    badge: '165% Audio Pull · Mandelbrot → Cherenkov',
+      'Tuned for heavy sub-bass & crunchy basslines (120% Bass Zoom): #1 Mandelbrot with 165% Audio Sub-Bass Zoom Pull & Kick Flash over #2 Cherenkov Hex Shockwaves and #3 3D KIFS Crystal',
+    badge: 'Bass Zoom 120% · Mandelbrot → Cherenkov',
     category: 'audio-reactive',
-    mechanics: ['165% Sub-Bass Pull', 'Kick Flash Boost', 'Cherenkov Shockwave', 'Optical Glow'],
+    mechanics: ['120% Bass Zoom Punch', '165% Sub-Bass Pull', 'Cherenkov Shockwave', 'Optical Glow'],
     apply: (base) =>
       withLayerOverrides(base, {
         distortionMode: 2,
@@ -1577,6 +2019,7 @@ export const SHADER_PRESETS: PresetItem[] = [
         layerCoordSpace: 0,
         negativeSpaceFill: 0.95,
         negativeSpaceThreshold: 0.25,
+        bassZoomPunch: 1.2,
         layerOrder: ['mandelbrot', 'cherenkov', 'kifscrystal', 'lissajous', 'starfield'],
         mixes: {
           mandelbrot: 0.98,
@@ -1595,12 +2038,12 @@ export const SHADER_PRESETS: PresetItem[] = [
   },
   {
     id: 'weightless-ethereal-choir-vortex',
-    name: 'Weightless Rig: 400-Iter Julia → Log Spiral → 4D Hopf → Nebula',
+    name: 'Bass Zoom Weightless: 08. 400-Iter Julia → 25. Log Spiral → 18. 4D Hopf',
     subtitle:
-      'Tuned for ethereal vocal choirs & liquid drumnbass: #1 400-Iter Julia tendrils flowing into #2 Logarithmic Spiral Vortex, #3 4D Hopf Fibration rings, and #4 Aurora Nebula',
-    badge: 'Weightless · Julia (400) → Spiral → 4D Hopf',
+      'Tuned for liquid basslines & vocal choirs (105% Bass Zoom): #1 400-Iter Julia tendrils flowing into #2 Logarithmic Spiral Vortex, #3 4D Hopf Fibration rings, and #4 Aurora Nebula',
+    badge: 'Bass Zoom 105% · Julia → Spiral → 4D Hopf',
     category: 'audio-reactive',
-    mechanics: ['400-Iter Julia', '4D Hopf Tori', 'Silky Flow 0.40', 'Optical Glow'],
+    mechanics: ['105% Bass Zoom Punch', '400-Iter Julia', '4D Hopf Tori', 'Optical Glow'],
     apply: (base) =>
       withLayerOverrides(base, {
         distortionMode: 0,
@@ -1613,6 +2056,7 @@ export const SHADER_PRESETS: PresetItem[] = [
         layerCoordSpace: 0,
         negativeSpaceFill: 0.93,
         negativeSpaceThreshold: 0.24,
+        bassZoomPunch: 1.05,
         layerOrder: ['julia', 'logspiralvortex', 'tesseract', 'nebula', 'starfield'],
         mixes: {
           julia: 0.94,
@@ -1879,12 +2323,12 @@ export const SHADER_PRESETS: PresetItem[] = [
   },
   {
     id: 'omni-twenty-five-layer-symphony',
-    name: '30-Layer Negative-Space Superposition',
+    name: '31-Layer Negative-Space Superposition',
     subtitle:
-      'Sequential negative-space cascade across all 30 modular shader layers in priority order',
-    badge: 'All 30 Layers',
+      'Sequential negative-space cascade across all 31 modular shader layers in priority order',
+    badge: 'All 31 Layers',
     category: 'new-layers',
-    mechanics: ['All 30 Layers Active', 'Neg-Space 88%', 'Gate 0.26', 'Gravity Ripple'],
+    mechanics: ['All 31 Layers Active', 'Neg-Space 88%', 'Gate 0.26', 'Gravity Ripple'],
     apply: (base) =>
       withLayerOverrides(base, {
         distortionMode: 2,
@@ -1894,6 +2338,7 @@ export const SHADER_PRESETS: PresetItem[] = [
         negativeSpaceFill: 0.88,
         negativeSpaceThreshold: 0.26,
         mixes: {
+          kleinsphere: 0.88,
           neontriangle: 0.85,
           neoncorridor: 0.82,
           ps2bios: 0.72,
@@ -2028,7 +2473,14 @@ ${SHARED_GLSL_UTILS}
 // Dynamically Registered Layer Functions
 ${functionBlocks}
 
-void mainImage(out vec4 o, in vec2 fc) {
+void mainImage(out vec4 o, in vec2 rawFc) {
+    // Pure Uniform 2D Pan & Zoom on Kick & Bassline:
+    // Uniformly scales the entire visualizer larger (like a camera pan-and-zoom) with zero pinching or stretching
+    float bassZoomAmt = max(0.0, uBassZoom);
+    float panZoomScale = 1.0 + bassZoomAmt * 0.95;
+    vec2 panDrift = vec2(sin(iTime * 0.65), cos(iTime * 0.52)) * (0.06 * iResolution.y * clamp(bassZoomAmt, 0.0, 1.0));
+    vec2 panCenter = 0.5 * iResolution.xy + uMouse * iResolution.y * clamp(bassZoomAmt * 0.45, 0.0, 0.65) + panDrift;
+    vec2 fc = (rawFc - panCenter) / panZoomScale + panCenter;
 ${MOUSE_DISTORTION_GLSL}
 
     // Gentle, silky audio-reactive modulation from Web Audio AnalyserNode
@@ -2091,13 +2543,14 @@ ${layerCompositePhase2}
 
     // Optional Sony Trinitron CRT Scanline & Aperture Grille Phosphor Mask
     if (uCrtScanlines > 0.001) {
-        float scanWave = 0.5 + 0.5 * sin(fc.y * 3.14159265);
-        float grilleR = 0.88 + 0.12 * sin(fc.x * 2.094395);
-        float grilleG = 0.88 + 0.12 * sin(fc.x * 2.094395 + 2.094395);
-        float grilleB = 0.88 + 0.12 * sin(fc.x * 2.094395 + 4.188790);
+        float scanWave = 0.5 + 0.5 * sin(rawFc.y * 3.14159265);
+        float grilleR = 0.88 + 0.12 * sin(rawFc.x * 2.094395);
+        float grilleG = 0.88 + 0.12 * sin(rawFc.x * 2.094395 + 2.094395);
+        float grilleB = 0.88 + 0.12 * sin(rawFc.x * 2.094395 + 4.188790);
         vec3 trinitron = col * vec3(grilleR, grilleG, grilleB) * mix(1.0, 0.72 + 0.36 * scanWave, clamp(uCrtScanlines, 0.0, 1.0));
         // Subtle CRT corner vignette
-        float vig = smoothstep(1.35, 0.45, length(p0) * 1.25);
+        vec2 screenP0 = (rawFc - 0.5 * iResolution.xy) / iResolution.y;
+        float vig = smoothstep(1.35, 0.45, length(screenP0) * 1.25);
         col = mix(col, trinitron * mix(1.0, vig, 0.35), clamp(uCrtScanlines, 0.0, 1.0));
     }
 
@@ -2233,7 +2686,11 @@ ${distortionSnippet}
 
 ${mainBlendLines.join('\n\n')}
 
-    col = col / (1.0 + col * 0.26);
+    col = col / (1.0 + col * 0.26);${
+      (state.vignetteBreathing ?? 0) > 0.01
+        ? `\n    // Post-Processing: Vignette & Lens Breathing (Dark Corners)\n    vec2 vigCorner = abs(fc / iResolution.xy - 0.5) * 2.0;\n    float vigBreath = ${(state.vignetteBreathing ?? 0).toFixed(2)} * 0.032 * sin(iTime * 1.15);\n    float vigDist = length(pow(vigCorner, vec2(1.55))) * 0.78 + length(p0) * 0.36;\n    float vigMask = smoothstep(${(1.26 - (state.vignetteBreathing ?? 0) * 0.46).toFixed(2)} + vigBreath * 1.6, 0.24, vigDist);\n    col *= mix(1.0, vigMask * vigMask, ${Math.min(1.0, (state.vignetteBreathing ?? 0) * 1.12).toFixed(2)});`
+        : ''
+    }
     o = vec4(col, 1.0);
 }`;
 }

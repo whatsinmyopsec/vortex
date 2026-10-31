@@ -27,6 +27,8 @@ import {
   Pause,
   Play,
   RotateCcw,
+  Search,
+  Sliders,
   Sparkles,
   Square,
   Video,
@@ -71,7 +73,7 @@ import {
   quantizeFrameToIndexed,
 } from './utils/mediaExporter';
 
-type HudSection = 'layers' | 'distortion' | 'presets' | 'glsl';
+type HudSection = 'presets' | 'layers' | 'postfx' | 'distortion' | 'glsl';
 type CaptureMode =
   | 'idle'
   | 'recording-gif'
@@ -120,6 +122,9 @@ export default function App() {
     useState<PresetTransitionRequest | null>(null);
   const [transitionProgress, setTransitionProgress] = useState<number | null>(null);
   const [autoCyclePresets, setAutoCyclePresets] = useState<boolean>(false);
+  const [layerFilterMode, setLayerFilterMode] = useState<'all' | 'active'>('all');
+  const [layerSearchQuery, setLayerSearchQuery] = useState<string>('');
+  const [showStackSettings, setShowStackSettings] = useState<boolean>(false);
 
   const [metrics, setMetrics] = useState<CursorMetrics>({
     x: 0.0,
@@ -243,7 +248,14 @@ export default function App() {
             continue;
           }
 
-          const { freq, phase, min, max, decimals } = layer.lfoMix;
+          const lfoMix = layer.lfoMix ?? {
+            freq: 0.22,
+            phase: 0.5,
+            min: 0.45,
+            max: 1.0,
+            decimals: 2,
+          };
+          const { freq, phase, min, max, decimals } = lfoMix;
           // Keep active layers above the > 0.01 active threshold while animating
           const activeMin = Math.max(0.05, min);
           const activeMax = Math.max(activeMin + 0.05, max);
@@ -254,7 +266,7 @@ export default function App() {
 
           for (let i = 0; i < layer.subParams.length; i++) {
             const sub = layer.subParams[i];
-            if (sub.lfo.decimals === 0) {
+            if (!sub.lfo || sub.lfo.decimals === 0) {
               values[sub.key] = currentLayer?.values?.[sub.key] ?? sub.defaultValue;
               continue;
             }
@@ -518,6 +530,41 @@ export default function App() {
     [presetFadeDuration]
   );
 
+  const activePresetObj = useMemo(
+    () => SHADER_PRESETS.find((p) => p.id === activePresetId) ?? SHADER_PRESETS[0],
+    [activePresetId]
+  );
+
+  const visibleLayers = useMemo(() => {
+    const q = layerSearchQuery.trim().toLowerCase();
+    return orderedLayers.filter((layer) => {
+      const isAct = (state.layers[layer.id]?.mix ?? layer.defaultMix) > 0.01;
+      if (layerFilterMode === 'active' && !isAct) return false;
+      if (!q) return true;
+      return (
+        layer.name.toLowerCase().includes(q) ||
+        layer.shortName.toLowerCase().includes(q) ||
+        layer.description.toLowerCase().includes(q)
+      );
+    });
+  }, [orderedLayers, state.layers, layerFilterMode, layerSearchQuery]);
+
+  const activePostFxCount = useMemo(() => {
+    let count = 0;
+    if ((state.trailPersistence ?? 0) > 0.01) count++;
+    if ((state.chromaticAberration ?? 0) > 0.01) count++;
+    if ((state.vignetteBreathing ?? 0) > 0.01) count++;
+    if ((state.ps2ColorMatrix ?? 0) > 0.01) count++;
+    if ((state.crtScanlines ?? 0) > 0.01) count++;
+    return count;
+  }, [
+    state.trailPersistence,
+    state.chromaticAberration,
+    state.vignetteBreathing,
+    state.ps2ColorMatrix,
+    state.crtScanlines,
+  ]);
+
   const filteredPresets = useMemo(
     () =>
       SHADER_PRESETS.filter(
@@ -552,13 +599,15 @@ export default function App() {
   const isPs2ModeActive =
     (state.trailPersistence ?? 0) > 0.35 ||
     (state.ps2ColorMatrix ?? 0) > 0.35 ||
+    (state.chromaticAberration ?? 0) > 0.25 ||
+    (state.vignetteBreathing ?? 0) > 0.25 ||
     (state.layers.ps2bios?.mix ?? 0) > 0.1 ||
     (state.layers.ps2vlm?.mix ?? 0) > 0.1;
 
   const handleTogglePs2Visualizer = useCallback(() => {
     const ps2Presets = SHADER_PRESETS.filter((p) => p.category === 'ps2-visualizer');
     if (isPs2ModeActive) {
-      // Cycle to the next PS2 Visualizer preset if already in PS2 mode
+      // Cycle to the next Post-Processing visualizer preset if already active
       const currentIdx = ps2Presets.findIndex((p) => p.id === activePresetId);
       const nextPreset =
         ps2Presets[(currentIdx + 1) % Math.max(1, ps2Presets.length)] ||
@@ -566,7 +615,7 @@ export default function App() {
       setAutoOrbit(true);
       handleSelectPreset(nextPreset);
     } else {
-      // Launch flagship PS2 System BIOS: Crystal Towers & 7 Orbs preset + Auto-Orbit
+      // Launch flagship Post-Processing preset + Auto-Orbit
       const flagship = ps2Presets[0] || SHADER_PRESETS[0];
       setAutoOrbit(true);
       setPresetCategory('ps2-visualizer');
@@ -589,6 +638,8 @@ export default function App() {
       trailPersistence: 0.0,
       crtScanlines: 0.0,
       ps2ColorMatrix: 0.0,
+      chromaticAberration: 0.0,
+      vignetteBreathing: 0.0,
     }));
   }, []);
 
@@ -893,8 +944,19 @@ export default function App() {
             Vortex
           </a>
 
-          {/* Zone 2: 4 concise single-line navigation links */}
+          {/* Zone 2: Concise single-line navigation links */}
           <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-neutral-300">
+            <button
+              type="button"
+              onClick={() => handleNavClick('presets')}
+              className={`hover:text-white transition-colors whitespace-nowrap shrink-0 pb-0.5 border-b-2 cursor-pointer ${
+                hudVisible && activeTab === 'presets'
+                  ? 'text-white border-amber-500'
+                  : 'border-transparent'
+              }`}
+            >
+              Presets
+            </button>
             <button
               type="button"
               onClick={() => handleNavClick('layers')}
@@ -904,7 +966,18 @@ export default function App() {
                   : 'border-transparent'
               }`}
             >
-              Shader Layers
+              Layers ({activeOrderedLayers.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => handleNavClick('postfx')}
+              className={`hover:text-white transition-colors whitespace-nowrap shrink-0 pb-0.5 border-b-2 cursor-pointer ${
+                hudVisible && activeTab === 'postfx'
+                  ? 'text-white border-amber-500'
+                  : 'border-transparent'
+              }`}
+            >
+              Post-Processing{activePostFxCount > 0 ? ` (${activePostFxCount})` : ''}
             </button>
             <button
               type="button"
@@ -916,17 +989,6 @@ export default function App() {
               }`}
             >
               Mouse Warp
-            </button>
-            <button
-              type="button"
-              onClick={() => handleNavClick('presets')}
-              className={`hover:text-white transition-colors whitespace-nowrap shrink-0 pb-0.5 border-b-2 cursor-pointer ${
-                hudVisible && activeTab === 'presets'
-                  ? 'text-white border-amber-500'
-                  : 'border-transparent'
-              }`}
-            >
-              Presets
             </button>
             <button
               type="button"
@@ -1058,323 +1120,371 @@ export default function App() {
             shaderPanelCollapsed ? 'max-h-[54px]' : 'max-h-[calc(100vh-7.5rem)]'
           }`}
         >
-          {/* Panel Header with Collapse / Expand Button */}
-          <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-white/10 bg-white/[0.03] shrink-0">
-            <div className="flex items-center gap-2 min-w-0">
-              <Layers className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span className="text-xs font-semibold tracking-wide text-white truncate">
-                Modular Shader Compositor ({SHADER_LAYERS.length} Layers)
-              </span>
+          {/* Streamlined Panel Header: Active Preset Switcher + Quick Actions */}
+          <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 border-b border-white/10 bg-white/[0.03] shrink-0">
+            <div className="flex items-center gap-1 min-w-0 flex-1">
+              <button
+                type="button"
+                onClick={() => handleStepPreset(-1)}
+                title="Previous Preset"
+                className="p-1.5 rounded-md bg-white/5 border border-white/10 text-neutral-300 hover:text-amber-300 hover:bg-white/10 transition-colors shrink-0 cursor-pointer"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('presets');
+                  setShaderPanelCollapsed(false);
+                }}
+                title="Click to browse all presets"
+                className="flex-1 min-w-0 px-2.5 py-1 rounded-md bg-white/5 border border-white/10 hover:border-amber-400/50 text-left transition-colors cursor-pointer"
+              >
+                <div className="text-[11px] font-semibold text-white truncate">
+                  {activePresetObj?.name ?? 'Custom Shader'}
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleStepPreset(1)}
+                title="Next Preset"
+                className="p-1.5 rounded-md bg-white/5 border border-white/10 text-neutral-300 hover:text-amber-300 hover:bg-white/10 transition-colors shrink-0 cursor-pointer"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => setShaderPanelCollapsed((prev) => !prev)}
-              title={
-                shaderPanelCollapsed
-                  ? 'Expand Shader Compositor Panel'
-                  : 'Collapse Shader Compositor Panel'
-              }
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-white/5 border border-white/10 text-neutral-300 hover:bg-white/10 hover:text-white transition-colors shrink-0 cursor-pointer"
-            >
-              {shaderPanelCollapsed ? (
-                <>
-                  <Maximize2 className="w-3 h-3 text-amber-400" />
-                  <span>Expand</span>
-                </>
-              ) : (
-                <>
-                  <Minimize2 className="w-3 h-3 text-neutral-400" />
-                  <span>Collapse</span>
-                </>
-              )}
-            </button>
+
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !isAnimatingSliders;
+                  setIsAnimatingSliders(next);
+                  if (next && musicDrivesTime && !isAudioPlaying) {
+                    void toggleAudioRef.current?.();
+                  }
+                }}
+                title="Animate active layer parameters with LFO"
+                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border transition-colors shrink-0 cursor-pointer ${
+                  isAnimatingSliders
+                    ? 'bg-amber-400 border-amber-300 text-neutral-950'
+                    : 'bg-white/5 border-white/10 text-neutral-300 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <Activity className="w-3 h-3" />
+                <span>LFO</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleReset}
+                title="Reset all sliders to defaults"
+                className="p-1.5 rounded-md bg-white/5 border border-white/10 text-neutral-300 hover:text-white hover:bg-white/10 transition-colors shrink-0 cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setShaderPanelCollapsed((prev) => !prev)}
+                title={
+                  shaderPanelCollapsed
+                    ? 'Expand Controls Panel'
+                    : 'Collapse Controls Panel'
+                }
+                className="p-1.5 rounded-md bg-white/5 border border-white/10 text-neutral-300 hover:text-white hover:bg-white/10 transition-colors shrink-0 cursor-pointer"
+              >
+                {shaderPanelCollapsed ? (
+                  <Maximize2 className="w-3.5 h-3.5 text-amber-400" />
+                ) : (
+                  <Minimize2 className="w-3.5 h-3.5 text-neutral-400" />
+                )}
+              </button>
+            </div>
           </div>
 
           {!shaderPanelCollapsed && (
             <>
-              {/* Segmented Control Tabs + Music-Driven Animation Bar */}
-              <div className="p-3 border-b border-white/10 space-y-2.5 shrink-0">
-                <div className="flex items-center gap-1 p-1 bg-white/5 rounded-lg overflow-x-auto">
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('layers')}
-                    className={`flex-1 inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                      activeTab === 'layers'
-                        ? 'bg-amber-500 text-neutral-950 font-semibold'
-                        : 'text-neutral-300 hover:text-white'
-                    }`}
-                  >
-                    <Layers className="w-3.5 h-3.5" />
-                    {SHADER_LAYERS.length} Layers
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('distortion')}
-                    className={`flex-1 inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                      activeTab === 'distortion'
-                        ? 'bg-amber-500 text-neutral-950 font-semibold'
-                        : 'text-neutral-300 hover:text-white'
-                    }`}
-                  >
-                    <Compass className="w-3.5 h-3.5" />
-                    Mouse Warp
-                  </button>
+              {/* Clean 5-Tab Segmented Navigation */}
+              <div className="px-3.5 py-2 border-b border-white/10 bg-black/25 shrink-0">
+                <div className="grid grid-cols-5 gap-1 p-1 bg-white/5 rounded-lg">
                   <button
                     type="button"
                     onClick={() => setActiveTab('presets')}
-                    className={`flex-1 inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    className={`inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-medium rounded-md transition-colors whitespace-nowrap cursor-pointer ${
                       activeTab === 'presets'
                         ? 'bg-amber-500 text-neutral-950 font-semibold'
                         : 'text-neutral-300 hover:text-white'
                     }`}
                   >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    Presets
+                    <Sparkles className="w-3 h-3 shrink-0" />
+                    <span>Presets</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('layers')}
+                    className={`inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-medium rounded-md transition-colors whitespace-nowrap cursor-pointer ${
+                      activeTab === 'layers'
+                        ? 'bg-amber-500 text-neutral-950 font-semibold'
+                        : 'text-neutral-300 hover:text-white'
+                    }`}
+                  >
+                    <Layers className="w-3 h-3 shrink-0" />
+                    <span>Layers ({activeOrderedLayers.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('postfx')}
+                    className={`inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-medium rounded-md transition-colors whitespace-nowrap cursor-pointer ${
+                      activeTab === 'postfx'
+                        ? 'bg-amber-500 text-neutral-950 font-semibold'
+                        : activePostFxCount > 0
+                        ? 'text-cyan-300 hover:text-white'
+                        : 'text-neutral-300 hover:text-white'
+                    }`}
+                  >
+                    <Sliders className="w-3 h-3 shrink-0" />
+                    <span>
+                      Post-FX{activePostFxCount > 0 ? ` (${activePostFxCount})` : ''}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('distortion')}
+                    className={`inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-medium rounded-md transition-colors whitespace-nowrap cursor-pointer ${
+                      activeTab === 'distortion'
+                        ? 'bg-amber-500 text-neutral-950 font-semibold'
+                        : 'text-neutral-300 hover:text-white'
+                    }`}
+                  >
+                    <Compass className="w-3 h-3 shrink-0" />
+                    <span>Warp</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setActiveTab('glsl')}
-                    className={`flex-1 inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    className={`inline-flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-medium rounded-md transition-colors whitespace-nowrap cursor-pointer ${
                       activeTab === 'glsl'
                         ? 'bg-amber-500 text-neutral-950 font-semibold'
                         : 'text-neutral-300 hover:text-white'
                     }`}
                   >
-                    <Code2 className="w-3.5 h-3.5" />
-                    GLSL
+                    <Code2 className="w-3 h-3 shrink-0" />
+                    <span>GLSL</span>
                   </button>
-                </div>
-
-                {/* Music Controls Shader Animation Quick Bar */}
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => void toggleAudioRef.current?.()}
-                    className={`flex-1 inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap cursor-pointer ${
-                      isAudioPlaying
-                        ? 'bg-amber-400 border-amber-300 text-neutral-950'
-                        : 'bg-amber-500/20 border-amber-400/60 text-amber-200 hover:bg-amber-500/30'
-                    }`}
-                  >
-                    {isAudioPlaying ? (
-                      <>
-                        <Volume2 className="w-3.5 h-3.5" />
-                        Music Driving Shaders ({metrics.shaderTimeScale.toFixed(2)}x)
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-3.5 h-3.5 fill-current" />
-                        Play Music to Drive Shaders
-                      </>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void toggleMusicDriveRef.current?.()}
-                    title="Toggle between Music-Driven Shader Animation and Free Clock"
-                    className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                      musicDrivesTime
-                        ? 'bg-cyan-500/20 border-cyan-400/60 text-cyan-200'
-                        : 'bg-white/5 border-white/10 text-neutral-400 hover:text-white'
-                    }`}
-                  >
-                    <Zap className="w-3 h-3" />
-                    {musicDrivesTime ? 'Music Sync' : 'Free Clock'}
-                  </button>
-                </div>
-
-                {/* Persistent Global Slider Animator + PS2 Visualizer Mode Action Bar */}
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={handleTogglePs2Visualizer}
-                    title="Launch or cycle PlayStation 2 (PS2) BIOS Towers & VLM Waveform Visualizer Mode with Temporal Motion Trails"
-                    className={`flex-1 inline-flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                      isPs2ModeActive
-                        ? 'bg-indigo-500/35 border-cyan-400 text-cyan-200 hover:bg-indigo-500/45'
-                        : 'bg-indigo-950/60 border-indigo-400/40 text-indigo-200 hover:bg-indigo-900/60 hover:border-cyan-400/60'
-                    }`}
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                    {isPs2ModeActive ? 'Next PS2 VLM Mode' : 'PS2 Visualizer Mode'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next = !isAnimatingSliders;
-                      setIsAnimatingSliders(next);
-                      if (next && musicDrivesTime && !isAudioPlaying) {
-                        void toggleAudioRef.current?.();
-                      }
-                    }}
-                    className={`inline-flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                      isAnimatingSliders
-                        ? 'bg-amber-400 border-amber-300 text-neutral-950'
-                        : 'bg-white/5 border-white/15 text-white hover:bg-white/10'
-                    }`}
-                  >
-                    <Activity className="w-3.5 h-3.5" />
-                    {isAnimatingSliders
-                      ? `Stop LFO (${activeOrderedLayers.length})`
-                      : `LFO (${activeOrderedLayers.length})`}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleReset}
-                    title="Reset all sliders to defaults"
-                    className="inline-flex items-center justify-center gap-1 px-2.5 py-2 rounded-lg text-xs font-medium bg-white/5 border border-white/10 text-neutral-300 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {/* Kick & Bassline Optical Zoom Punch Control */}
-                <div className="px-2.5 py-1.5 rounded-lg bg-white/[0.04] border border-white/10 space-y-1">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-medium text-neutral-200 flex items-center gap-1.5">
-                      <Zap className="w-3 h-3 text-amber-400" />
-                      Kick &amp; Bass Zoom Punch
-                    </span>
-                    <div className="flex items-center gap-1.5 font-mono">
-                      {(metrics.bassZoomLevel ?? 0) > 0.01 && (
-                        <span className="px-1.5 py-0.5 rounded bg-amber-400/20 border border-amber-400/40 text-[10px] text-amber-200">
-                          +{Math.round((metrics.bassZoomLevel ?? 0) * 100)}%
-                        </span>
-                      )}
-                      <span className="text-amber-300 font-semibold">
-                        {Math.round((state.bassZoomPunch ?? 0.45) * 100)}%
-                      </span>
-                    </div>
-                  </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={1.5}
-                    step={0.05}
-                    value={state.bassZoomPunch ?? 0.45}
-                    onChange={(e) =>
-                      updateCoreParam('bassZoomPunch', parseFloat(e.target.value))
-                    }
-                    className="w-full h-1.5 bg-white/15 rounded-lg appearance-none cursor-pointer accent-amber-400"
-                  />
                 </div>
               </div>
 
               {/* Scrollable Body */}
-              <div className="p-5 overflow-y-auto space-y-5">
+              <div className="p-4 overflow-y-auto space-y-4">
                 {activeTab === 'layers' && (
-                  <div className="space-y-4">
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <h2 className="text-sm font-semibold text-white">
-                          Modular Shader Layer Registry
-                        </h2>
+                  <div className="space-y-3">
+                    {/* Compact Layer Filter & Search Bar */}
+                    <div className="flex items-center gap-1.5">
+                      <div className="flex items-center p-0.5 bg-white/5 border border-white/10 rounded-lg shrink-0">
                         <button
                           type="button"
-                          onClick={() => handleSoloLayer('all')}
-                          className="text-xs font-semibold text-amber-400 hover:text-amber-300 transition-colors cursor-pointer"
+                          onClick={() => setLayerFilterMode('all')}
+                          className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+                            layerFilterMode === 'all'
+                              ? 'bg-amber-400 text-neutral-950 font-semibold'
+                              : 'text-neutral-300 hover:text-white'
+                          }`}
                         >
-                          Stack All {SHADER_LAYERS.length}
+                          All ({SHADER_LAYERS.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLayerFilterMode('active')}
+                          className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+                            layerFilterMode === 'active'
+                              ? 'bg-amber-400 text-neutral-950 font-semibold'
+                              : 'text-neutral-300 hover:text-white'
+                          }`}
+                        >
+                          Active ({activeOrderedLayers.length})
                         </button>
                       </div>
-                      <p className="text-xs text-neutral-300 leading-relaxed">
-                        {currentBlendStyleInfo.description}
-                      </p>
+
+                      <div className="relative flex-1 min-w-0">
+                        <Search className="w-3 h-3 text-neutral-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input
+                          type="text"
+                          value={layerSearchQuery}
+                          onChange={(e) => setLayerSearchQuery(e.target.value)}
+                          placeholder="Search layers..."
+                          className="w-full pl-7 pr-2 py-1 rounded-lg bg-white/5 border border-white/10 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-amber-400/60"
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowStackSettings((prev) => !prev)}
+                        title="Toggle Blend Mode & Negative-Space Cascade Settings"
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-colors shrink-0 cursor-pointer ${
+                          showStackSettings
+                            ? 'bg-amber-500/20 border-amber-400 text-amber-200'
+                            : 'bg-white/5 border-white/10 text-neutral-300 hover:text-white'
+                        }`}
+                      >
+                        Blend
+                      </button>
                     </div>
 
-                    {/* Global Blend Mode & Coordinate Space */}
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {LAYER_BLEND_STYLES.map((style) => {
-                        const isSelected = state.layerBlendStyle === style.id;
-                        return (
+                    {/* Collapsible Blend & Negative-Space Settings Drawer */}
+                    {showStackSettings && (
+                      <div className="p-3 rounded-lg bg-white/[0.04] border border-white/15 space-y-2.5">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="font-semibold text-amber-300">
+                            Compositor Blend &amp; Coordinate Space
+                          </span>
                           <button
-                            key={style.id}
                             type="button"
-                            onClick={() =>
-                              updateCoreParam('layerBlendStyle', style.id as LayerBlendStyle)
-                            }
-                            className={`px-2.5 py-2 rounded-lg text-center text-xs font-medium border transition-colors whitespace-nowrap truncate cursor-pointer ${
-                              isSelected
-                                ? 'bg-amber-500/15 border-amber-400 text-white font-semibold'
-                                : 'bg-white/5 border-white/10 text-neutral-300 hover:bg-white/10 hover:text-white'
+                            onClick={() => handleSoloLayer('all')}
+                            className="text-[10px] font-semibold text-amber-400 hover:text-amber-300 cursor-pointer"
+                          >
+                            Enable All {SHADER_LAYERS.length}
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {LAYER_BLEND_STYLES.map((style) => {
+                            const isSelected = state.layerBlendStyle === style.id;
+                            return (
+                              <button
+                                key={style.id}
+                                type="button"
+                                onClick={() =>
+                                  updateCoreParam('layerBlendStyle', style.id as LayerBlendStyle)
+                                }
+                                className={`px-2 py-1.5 rounded-md text-center text-[11px] font-medium border transition-colors truncate cursor-pointer ${
+                                  isSelected
+                                    ? 'bg-amber-500/20 border-amber-400 text-white font-semibold'
+                                    : 'bg-white/5 border-white/10 text-neutral-300 hover:text-white'
+                                }`}
+                              >
+                                {style.shortLabel}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <div className="flex items-center gap-1 p-1 bg-white/5 rounded-lg">
+                          <button
+                            type="button"
+                            onClick={() => updateCoreParam('layerCoordSpace', 0 as LayerCoordSpace)}
+                            className={`flex-1 px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                              state.layerCoordSpace === 0
+                                ? 'bg-white/15 text-white font-semibold'
+                                : 'text-neutral-400 hover:text-white'
                             }`}
                           >
-                            {style.shortLabel}
+                            2D Planar Field (p)
                           </button>
-                        );
-                      })}
-                    </div>
+                          <button
+                            type="button"
+                            onClick={() => updateCoreParam('layerCoordSpace', 1 as LayerCoordSpace)}
+                            className={`flex-1 px-2 py-1 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                              state.layerCoordSpace === 1
+                                ? 'bg-white/15 text-white font-semibold'
+                                : 'text-neutral-400 hover:text-white'
+                            }`}
+                          >
+                            3D Polar Tunnel (uv)
+                          </button>
+                        </div>
 
-                    <div className="flex items-center gap-1 p-1 bg-white/5 rounded-lg">
-                      <button
-                        type="button"
-                        onClick={() => updateCoreParam('layerCoordSpace', 0 as LayerCoordSpace)}
-                        className={`flex-1 px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                          state.layerCoordSpace === 0
-                            ? 'bg-white/15 text-white font-semibold'
-                            : 'text-neutral-400 hover:text-white'
-                        }`}
-                      >
-                        Mouse-Warped Field (p)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => updateCoreParam('layerCoordSpace', 1 as LayerCoordSpace)}
-                        className={`flex-1 px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                          state.layerCoordSpace === 1
-                            ? 'bg-white/15 text-white font-semibold'
-                            : 'text-neutral-400 hover:text-white'
-                        }`}
-                      >
-                        Cylindrical Polar (uv)
-                      </button>
-                    </div>
+                        <div className="grid grid-cols-2 gap-2.5 pt-1 border-t border-white/10">
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-[11px] text-neutral-300">
+                              <span>Neg-Space Fill</span>
+                              <span className="font-mono tabular-nums text-amber-400">
+                                {Math.round(state.negativeSpaceFill * 100)}%
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0.0"
+                              max="1.0"
+                              step="0.02"
+                              value={state.negativeSpaceFill}
+                              onChange={(e) =>
+                                updateCoreParam(
+                                  'negativeSpaceFill',
+                                  parseFloat(e.target.value)
+                                )
+                              }
+                              className="w-full hud-slider"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-[11px] text-neutral-300">
+                              <span>Neg-Space Carve</span>
+                              <span className="font-mono tabular-nums text-cyan-300">
+                                {(state.negativeSpaceThreshold * 100).toFixed(0)}%
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0.02"
+                              max="0.60"
+                              step="0.01"
+                              value={state.negativeSpaceThreshold}
+                              onChange={(e) =>
+                                updateCoreParam(
+                                  'negativeSpaceThreshold',
+                                  parseFloat(e.target.value)
+                                )
+                              }
+                              className="w-full hud-slider"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
-                    {/* Negative-Space Cascade & Layer Priority Order Controls */}
-                    <div className="p-3 rounded-lg bg-white/[0.035] border border-white/15 space-y-2.5">
+                    {/* Compact Active Layer Chain Strip */}
+                    <div className="p-2.5 rounded-lg bg-white/[0.03] border border-white/10 space-y-2">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-semibold text-amber-300">
-                          Negative-Space Layer Chain ({activeOrderedLayers.length} Active)
+                        <span className="text-[11px] font-semibold text-neutral-300">
+                          Priority Chain (#1 Foreground → Background)
                         </span>
                         <div className="flex items-center gap-1">
                           <button
                             type="button"
                             onClick={handleSortActiveFirst}
-                            title="Group all active layers at the top of the card list"
-                            className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] font-medium text-neutral-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                            title="Group active layers at the top of the list"
+                            className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] font-medium text-neutral-300 hover:text-white cursor-pointer"
                           >
-                            Active Top
+                            Group Active
                           </button>
                           <button
                             type="button"
                             onClick={handleReverseActiveOrder}
-                            title="Reverse the priority order of active layers"
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 border border-amber-400/40 text-[10px] font-semibold text-amber-300 hover:bg-amber-500/25 transition-colors cursor-pointer"
+                            title="Reverse active layer order"
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-400/40 text-[10px] font-semibold text-amber-300 hover:bg-amber-500/25 cursor-pointer"
                           >
                             <ArrowUpDown className="w-2.5 h-2.5" />
-                            Flip Order
+                            Flip
                           </button>
                           <button
                             type="button"
                             onClick={handleResetLayerOrder}
-                            title={`Restore numerical 01–${SHADER_LAYERS.length} layer order`}
-                            className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] font-medium text-neutral-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                            title="Restore default 01–31 order"
+                            className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] font-medium text-neutral-400 hover:text-white cursor-pointer"
                           >
                             01–{SHADER_LAYERS.length}
                           </button>
                         </div>
                       </div>
 
-                      {/* Live Interactive Negative-Space Chain Strip */}
                       {activeOrderedLayers.length > 0 ? (
-                        <div className="flex items-center gap-1 overflow-x-auto pb-1">
+                        <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
                           {activeOrderedLayers.map((layer, idx) => (
                             <React.Fragment key={layer.id}>
                               <button
                                 type="button"
                                 onClick={() => handleMoveLayerToTop(layer.id)}
                                 title={`Click to promote ${layer.name} to #1 Foreground`}
-                                className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                                   idx === 0
                                     ? 'bg-amber-400 text-neutral-950 font-semibold'
                                     : 'bg-white/10 text-neutral-200 border border-white/15 hover:border-amber-400/50'
@@ -1394,10 +1504,10 @@ export default function App() {
                                       activeOrderedLayers[idx + 1].id
                                     )
                                   }
-                                  title={`Swap #${idx + 1} (${layer.shortName}) and #${idx + 2} (${activeOrderedLayers[idx + 1].shortName})`}
-                                  className="p-1 rounded bg-white/5 hover:bg-amber-500/25 text-neutral-400 hover:text-amber-300 transition-colors shrink-0 cursor-pointer"
+                                  title="Swap adjacent layers"
+                                  className="p-0.5 rounded bg-white/5 hover:bg-amber-500/25 text-neutral-400 hover:text-amber-300 transition-colors shrink-0 cursor-pointer"
                                 >
-                                  <ArrowLeftRight className="w-3 h-3" />
+                                  <ArrowLeftRight className="w-2.5 h-2.5" />
                                 </button>
                               )}
                             </React.Fragment>
@@ -1405,97 +1515,263 @@ export default function App() {
                         </div>
                       ) : (
                         <p className="text-[11px] text-neutral-400">
-                          Turn up any layer slider below to start the negative-space chain.
+                          Click any layer badge below or drag its slider to enable it.
                         </p>
                       )}
+                    </div>
 
-                      {/* Negative-Space Fill & Threshold Sliders */}
-                      <div className="grid grid-cols-2 gap-2.5 pt-1 border-t border-white/10">
-                        <div className="space-y-1">
-                          <div className="flex items-center justify-between text-[11px] text-neutral-300">
-                            <span title="How strongly each layer's negative space is inhabited by the next layer instead of overlapping on bright areas">
-                              Neg-Space Fill
+                    {/* Layer Cards List (Active layers auto-expand sub-sliders; inactive layers stay compact) */}
+                    <div className="space-y-2">
+                      {visibleLayers.map((layer) => {
+                        const globalIdx = orderedLayers.findIndex((l) => l.id === layer.id);
+                        return (
+                          <LayerCard
+                            key={layer.id}
+                            layer={layer}
+                            runtime={state.layers[layer.id]}
+                            orderIndex={globalIdx >= 0 ? globalIdx : 0}
+                            totalLayers={orderedLayers.length}
+                            activeChainRank={activeChainRankMap[layer.id] ?? null}
+                            isDragging={draggedLayerId === layer.id}
+                            isDragOver={
+                              dragOverLayerId === layer.id &&
+                              draggedLayerId !== layer.id
+                            }
+                            onMixChange={handleLayerMixChange}
+                            onSubParamChange={handleLayerSubParamChange}
+                            onSolo={handleSoloLayer}
+                            onMoveUp={handleMoveLayerUp}
+                            onMoveDown={handleMoveLayerDown}
+                            onMoveToTop={handleMoveLayerToTop}
+                            onDragStart={handleDragStart}
+                            onDragOver={handleDragOver}
+                            onDrop={handleDrop}
+                            onDragEnd={handleDragEnd}
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'postfx' && (
+                  <div className="space-y-3.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <h2 className="text-sm font-semibold text-white">
+                          Post-Processing &amp; Optical FX
+                        </h2>
+                        <p className="text-xs text-neutral-400">
+                          Optical lens vignette, chromatic prism, motion trails, and bass zoom punch.
+                        </p>
+                      </div>
+                      {activePostFxCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleDisablePs2Fx}
+                          className="px-2.5 py-1 rounded-md bg-white/10 border border-white/15 text-[11px] font-medium text-neutral-200 hover:text-white hover:bg-white/15 transition-colors shrink-0 cursor-pointer"
+                        >
+                          Clear Post-FX
+                        </button>
+                      )}
+                    </div>
+
+                    {/* One-Click Optical Profiles */}
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setState((prev) => ({
+                            ...prev,
+                            vignetteBreathing: 0.65,
+                            chromaticAberration: 0.35,
+                          }))
+                        }
+                        className="px-2.5 py-2 rounded-lg bg-white/5 border border-white/10 hover:border-emerald-400/50 text-left transition-colors cursor-pointer"
+                      >
+                        <div className="text-xs font-semibold text-emerald-300">
+                          Cinema Lens &amp; Vignette
+                        </div>
+                        <div className="text-[10px] text-neutral-400">
+                          65% Dark Corners · 35% Prism
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setState((prev) => ({
+                            ...prev,
+                            trailPersistence: 0.82,
+                            trailZoomWarp: 0.009,
+                            chromaticAberration: 0.45,
+                            vignetteBreathing: 0.45,
+                          }))
+                        }
+                        className="px-2.5 py-2 rounded-lg bg-white/5 border border-white/10 hover:border-cyan-400/50 text-left transition-colors cursor-pointer"
+                      >
+                        <div className="text-xs font-semibold text-cyan-300">
+                          Liquid Motion Trails
+                        </div>
+                        <div className="text-[10px] text-neutral-400">
+                          82% Trails · 45% Prism &amp; Vignette
+                        </div>
+                      </button>
+                    </div>
+
+                    {/* 1. Kick & Bassline Optical Zoom Punch */}
+                    <div className="p-3 rounded-lg bg-white/[0.04] border border-white/10 space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-semibold text-white flex items-center gap-1.5">
+                          <Zap className="w-3.5 h-3.5 text-amber-400" />
+                          Kick &amp; Bass Camera Zoom Punch
+                        </span>
+                        <div className="flex items-center gap-1.5 font-mono">
+                          {(metrics.bassZoomLevel ?? 0) > 0.01 && (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-400/20 border border-amber-400/40 text-[10px] text-amber-200">
+                              +{Math.round((metrics.bassZoomLevel ?? 0) * 100)}%
                             </span>
-                            <span className="font-mono tabular-nums text-amber-400">
-                              {Math.round(state.negativeSpaceFill * 100)}%
+                          )}
+                          <span className="text-amber-300 font-semibold">
+                            {Math.round((state.bassZoomPunch ?? 1.15) * 100)}%
+                          </span>
+                        </div>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={2.5}
+                        step={0.05}
+                        value={state.bassZoomPunch ?? 1.15}
+                        onChange={(e) =>
+                          updateCoreParam('bassZoomPunch', parseFloat(e.target.value))
+                        }
+                        className="w-full hud-slider"
+                      />
+                    </div>
+
+                    {/* 2. Optical Lens FX: Vignette & Lens Breathing + Chromatic Aberration */}
+                    <div className="p-3 rounded-lg bg-white/[0.04] border border-white/10 space-y-3">
+                      <div className="text-xs font-semibold text-white">
+                        Optical Lens FX
+                      </div>
+
+                      {/* Vignette & Lens Breathing (Dark Corners) */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-[11px] text-neutral-300">
+                          <span>Vignette &amp; Lens Breathing (Dark Corners)</span>
+                          <div className="flex items-center gap-1">
+                            {[
+                              { label: 'Off', val: 0.0 },
+                              { label: '35%', val: 0.35 },
+                              { label: '65%', val: 0.65 },
+                              { label: '100%', val: 1.0 },
+                            ].map((opt) => {
+                              const isCurrent =
+                                Math.abs((state.vignetteBreathing ?? 0) - opt.val) <
+                                0.03;
+                              return (
+                                <button
+                                  key={opt.label}
+                                  type="button"
+                                  onClick={() =>
+                                    updateCoreParam('vignetteBreathing', opt.val)
+                                  }
+                                  className={`px-1.5 py-0.5 rounded text-[9px] font-mono border transition-colors cursor-pointer ${
+                                    isCurrent
+                                      ? 'bg-emerald-500/30 border-emerald-400 text-emerald-200 font-semibold'
+                                      : 'bg-white/5 border-white/10 text-neutral-400 hover:text-white'
+                                  }`}
+                                >
+                                  {opt.label}
+                                </button>
+                              );
+                            })}
+                            <span className="font-mono tabular-nums text-emerald-300 font-semibold min-w-[34px] text-right">
+                              {Math.round((state.vignetteBreathing ?? 0) * 100)}%
                             </span>
                           </div>
-                          <input
-                            type="range"
-                            min="0.0"
-                            max="1.0"
-                            step="0.02"
-                            value={state.negativeSpaceFill}
-                            onChange={(e) =>
-                              updateCoreParam(
-                                'negativeSpaceFill',
-                                parseFloat(e.target.value)
-                              )
-                            }
-                            className="w-full hud-slider"
-                          />
                         </div>
-                        <div className="space-y-1">
-                          <div className="flex items-center justify-between text-[11px] text-neutral-300">
-                            <span title="Luminance threshold below which a pixel is carved as open negative space for the next layer">
-                              Neg-Space Carve
-                            </span>
-                            <span className="font-mono tabular-nums text-cyan-300">
-                              {(state.negativeSpaceThreshold * 100).toFixed(0)}%
+                        <input
+                          type="range"
+                          min="0.0"
+                          max="1.0"
+                          step="0.02"
+                          value={state.vignetteBreathing ?? 0.0}
+                          onChange={(e) =>
+                            updateCoreParam(
+                              'vignetteBreathing',
+                              parseFloat(e.target.value)
+                            )
+                          }
+                          aria-label="Vignette and Lens Breathing Intensity"
+                          className="w-full hud-slider"
+                        />
+                      </div>
+
+                      {/* Chromatic Aberration */}
+                      <div className="space-y-1.5 pt-2 border-t border-white/10">
+                        <div className="flex items-center justify-between text-[11px] text-neutral-300">
+                          <span>Chromatic Aberration (RGB Prism)</span>
+                          <div className="flex items-center gap-1">
+                            {[
+                              { label: 'Off', val: 0.0 },
+                              { label: '35%', val: 0.35 },
+                              { label: '65%', val: 0.65 },
+                              { label: '100%', val: 1.0 },
+                            ].map((opt) => {
+                              const isCurrent =
+                                Math.abs((state.chromaticAberration ?? 0) - opt.val) <
+                                0.03;
+                              return (
+                                <button
+                                  key={opt.label}
+                                  type="button"
+                                  onClick={() =>
+                                    updateCoreParam('chromaticAberration', opt.val)
+                                  }
+                                  className={`px-1.5 py-0.5 rounded text-[9px] font-mono border transition-colors cursor-pointer ${
+                                    isCurrent
+                                      ? 'bg-fuchsia-500/30 border-fuchsia-400 text-fuchsia-200 font-semibold'
+                                      : 'bg-white/5 border-white/10 text-neutral-400 hover:text-white'
+                                  }`}
+                                >
+                                  {opt.label}
+                                </button>
+                              );
+                            })}
+                            <span className="font-mono tabular-nums text-fuchsia-300 font-semibold min-w-[34px] text-right">
+                              {Math.round((state.chromaticAberration ?? 0) * 100)}%
                             </span>
                           </div>
-                          <input
-                            type="range"
-                            min="0.02"
-                            max="0.60"
-                            step="0.01"
-                            value={state.negativeSpaceThreshold}
-                            onChange={(e) =>
-                              updateCoreParam(
-                                'negativeSpaceThreshold',
-                                parseFloat(e.target.value)
-                              )
-                            }
-                            className="w-full hud-slider"
-                          />
                         </div>
+                        <input
+                          type="range"
+                          min="0.0"
+                          max="1.0"
+                          step="0.02"
+                          value={state.chromaticAberration ?? 0.0}
+                          onChange={(e) =>
+                            updateCoreParam(
+                              'chromaticAberration',
+                              parseFloat(e.target.value)
+                            )
+                          }
+                          aria-label="Chromatic Aberration Intensity"
+                          className="w-full hud-slider"
+                        />
                       </div>
                     </div>
 
-                    {/* PS2 VLM Temporal Feedback & Trinitron Post-FX Deck */}
-                    <div className="p-3 rounded-lg bg-indigo-950/35 border border-indigo-400/30 space-y-2.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-semibold text-cyan-300">
-                          PS2 VLM Motion Trails & Trinitron FX
-                        </span>
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={handleTogglePs2Visualizer}
-                            className="px-2 py-0.5 rounded bg-cyan-500/20 border border-cyan-400/50 text-[10px] font-semibold text-cyan-200 hover:bg-cyan-500/30 transition-colors cursor-pointer"
-                          >
-                            Load PS2 Preset
-                          </button>
-                          {((state.trailPersistence ?? 0) > 0.01 ||
-                            (state.crtScanlines ?? 0) > 0.01 ||
-                            (state.ps2ColorMatrix ?? 0) > 0.01) && (
-                            <button
-                              type="button"
-                              onClick={handleDisablePs2Fx}
-                              className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] font-medium text-neutral-300 hover:text-white transition-colors cursor-pointer"
-                            >
-                              Clear FX
-                            </button>
-                          )}
-                        </div>
+                    {/* 3. Frame Feedback Motion Trails & Display Grade */}
+                    <div className="p-3 rounded-lg bg-white/[0.04] border border-white/10 space-y-3">
+                      <div className="text-xs font-semibold text-white">
+                        Motion Trails &amp; Display Grade
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2.5">
+                      <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">
                           <div className="flex items-center justify-between text-[11px] text-neutral-300">
-                            <span title="PS2 VLM frame-buffer ping-pong persistence creating glowing liquid motion trails">
-                              Trail Persistence
-                            </span>
+                            <span>Trail Persistence</span>
                             <span className="font-mono tabular-nums text-cyan-300">
                               {Math.round((state.trailPersistence ?? 0) * 100)}%
                             </span>
@@ -1518,9 +1794,7 @@ export default function App() {
 
                         <div className="space-y-1">
                           <div className="flex items-center justify-between text-[11px] text-neutral-300">
-                            <span title="Radial zoom smear per feedback frame (positive = outward rush, negative = inward vortex)">
-                              Trail Zoom Smear
-                            </span>
+                            <span>Trail Zoom Smear</span>
                             <span className="font-mono tabular-nums text-cyan-300">
                               {((state.trailZoomWarp ?? 0.009) * 100).toFixed(1)}%
                             </span>
@@ -1543,9 +1817,7 @@ export default function App() {
 
                         <div className="space-y-1">
                           <div className="flex items-center justify-between text-[11px] text-neutral-300">
-                            <span title="Y2K Sony PlayStation 2 BIOS deep cobalt, sapphire, and electric cyan color grade">
-                              PS2 Cobalt Grade
-                            </span>
+                            <span>Cobalt Color Grade</span>
                             <span className="font-mono tabular-nums text-indigo-300">
                               {Math.round((state.ps2ColorMatrix ?? 0) * 100)}%
                             </span>
@@ -1568,9 +1840,7 @@ export default function App() {
 
                         <div className="space-y-1">
                           <div className="flex items-center justify-between text-[11px] text-neutral-300">
-                            <span title="Sony Trinitron CRT aperture grille RGB phosphor mask & scanline bloom">
-                              Trinitron CRT
-                            </span>
+                            <span>CRT Scanlines</span>
                             <span className="font-mono tabular-nums text-amber-400">
                               {Math.round((state.crtScanlines ?? 0) * 100)}%
                             </span>
@@ -1591,35 +1861,6 @@ export default function App() {
                           />
                         </div>
                       </div>
-                    </div>
-
-                    {/* Dynamically Rendered Layer Cards in User's Stack Order */}
-                    <div className="space-y-3">
-                      {orderedLayers.map((layer, index) => (
-                        <LayerCard
-                          key={layer.id}
-                          layer={layer}
-                          runtime={state.layers[layer.id]}
-                          orderIndex={index}
-                          totalLayers={orderedLayers.length}
-                          activeChainRank={activeChainRankMap[layer.id] ?? null}
-                          isDragging={draggedLayerId === layer.id}
-                          isDragOver={
-                            dragOverLayerId === layer.id &&
-                            draggedLayerId !== layer.id
-                          }
-                          onMixChange={handleLayerMixChange}
-                          onSubParamChange={handleLayerSubParamChange}
-                          onSolo={handleSoloLayer}
-                          onMoveUp={handleMoveLayerUp}
-                          onMoveDown={handleMoveLayerDown}
-                          onMoveToTop={handleMoveLayerToTop}
-                          onDragStart={handleDragStart}
-                          onDragOver={handleDragOver}
-                          onDrop={handleDrop}
-                          onDragEnd={handleDragEnd}
-                        />
-                      ))}
                     </div>
                   </div>
                 )}
@@ -2038,12 +2279,30 @@ export default function App() {
                       {(
                         [
                           { id: 'all', label: `All (${SHADER_PRESETS.length})` },
-                          { id: 'ps2-visualizer', label: 'PS2 Visualizer (4)' },
-                          { id: 'new-layers', label: 'New Shaders' },
-                          { id: 'fractal-cascades', label: '400-Iter & Fractals' },
-                          { id: 'order-inversions', label: 'Order Inversions' },
-                          { id: 'polar-wrapped', label: '3D Polar Space' },
-                          { id: 'audio-reactive', label: 'Audio & 4D' },
+                          {
+                            id: 'audio-reactive',
+                            label: `Bass Zoom & Audio (${SHADER_PRESETS.filter((p) => p.category === 'audio-reactive').length})`,
+                          },
+                          {
+                            id: 'ps2-visualizer',
+                            label: `PS2 Visualizer (${SHADER_PRESETS.filter((p) => p.category === 'ps2-visualizer').length})`,
+                          },
+                          {
+                            id: 'new-layers',
+                            label: `New Shaders (${SHADER_PRESETS.filter((p) => p.category === 'new-layers').length})`,
+                          },
+                          {
+                            id: 'fractal-cascades',
+                            label: `400-Iter & Fractals (${SHADER_PRESETS.filter((p) => p.category === 'fractal-cascades').length})`,
+                          },
+                          {
+                            id: 'order-inversions',
+                            label: `Order Inversions (${SHADER_PRESETS.filter((p) => p.category === 'order-inversions').length})`,
+                          },
+                          {
+                            id: 'polar-wrapped',
+                            label: `3D Polar Space (${SHADER_PRESETS.filter((p) => p.category === 'polar-wrapped').length})`,
+                          },
                         ] as const
                       ).map((cat) => (
                         <button
@@ -2146,11 +2405,11 @@ export default function App() {
         </aside>
       )}
 
-      {/* Discreet Bottom-Left Interactive Telemetry & Playback Bar */}
-      <div className="absolute bottom-5 left-6 right-6 z-10 flex flex-wrap items-center justify-between gap-4 pointer-events-none">
-        <div className="pointer-events-auto flex items-center gap-4 px-4 py-2.5 rounded-xl bg-black/55 backdrop-blur-md border border-white/10 text-xs text-neutral-300">
-          <div className="flex items-center gap-2 font-mono tabular-nums">
-            <span className="text-neutral-400">Mouse</span>
+      {/* Streamlined Bottom Transport & Viewport Bar */}
+      <div className="absolute bottom-5 left-6 right-6 z-10 flex flex-wrap items-center justify-between gap-3 pointer-events-none">
+        <div className="pointer-events-auto flex items-center gap-3 px-3.5 py-2 rounded-xl bg-black/55 backdrop-blur-md border border-white/10 text-xs text-neutral-300">
+          <div className="flex items-center gap-1.5 font-mono tabular-nums">
+            <span className="text-neutral-400">Cursor</span>
             <span className="text-white">
               ({metrics.x >= 0 ? `+${metrics.x.toFixed(2)}` : metrics.x.toFixed(2)},{' '}
               {metrics.y >= 0 ? `+${metrics.y.toFixed(2)}` : metrics.y.toFixed(2)})
@@ -2159,72 +2418,20 @@ export default function App() {
           <span aria-hidden="true" className="text-white/20">
             ·
           </span>
-          <div className="hidden sm:flex items-center gap-2 font-mono tabular-nums">
-            <span className="text-neutral-400">Polar r</span>
-            <span className="text-amber-400">{metrics.r.toFixed(2)}</span>
-            <span aria-hidden="true" className="text-white/20">
-              ·
-            </span>
-            <span className="text-neutral-400">θ</span>
-            <span className="text-white">{metrics.angleDeg.toFixed(0)}°</span>
-          </div>
-          <span aria-hidden="true" className="hidden sm:inline text-white/20">
-            ·
-          </span>
-          <div className="hidden md:flex items-center gap-2 font-mono tabular-nums">
-            <span className="text-neutral-400">Shader Speed</span>
+          <div className="flex items-center gap-1.5 font-mono tabular-nums">
+            <span className="text-neutral-400">Speed</span>
             <span className="text-amber-400">
               {metrics.shaderTimeScale.toFixed(2)}x
-            </span>
-            <span className="text-[11px] text-neutral-400">
-              {musicDrivesTime
-                ? isAudioPlaying
-                  ? '(Music-Driven)'
-                  : '(Start Music to Animate)'
-                : '(Free Clock)'}
             </span>
           </div>
         </div>
 
-        {/* Right-side Quick Viewport Controls */}
-        <div className="pointer-events-auto flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setFollowMouse((prev) => !prev)}
-            title="Toggle Mouse Follow (Shortcut: M)"
-            className={`inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl backdrop-blur-md border text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              followMouse
-                ? 'bg-amber-500/25 border-amber-400 text-amber-200 hover:bg-amber-500/35'
-                : 'bg-black/55 border-white/15 text-neutral-200 hover:bg-black/75'
-            }`}
-          >
-            {followMouse ? (
-              <>
-                <MousePointer className="w-3.5 h-3.5 text-amber-400" />
-                Following Mouse (M)
-              </>
-            ) : (
-              <>
-                <Lock className="w-3.5 h-3.5 text-emerald-400" />
-                Mouse Locked (M)
-              </>
-            )}
-          </button>
-
-          <button
-            type="button"
-            onClick={handleLockAndCenterMouse}
-            title="Center shader origin to (0, 0) and lock mouse (Shortcut: C)"
-            className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-black/55 backdrop-blur-md border border-white/10 text-xs font-medium text-neutral-200 hover:text-white hover:bg-black/75 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            <Crosshair className="w-3.5 h-3.5 text-cyan-400" />
-            Center (0,0)
-          </button>
-
+        {/* Unified Quick Transport & Viewport Controls */}
+        <div className="pointer-events-auto flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => void toggleAudioRef.current?.()}
-            className={`inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl backdrop-blur-md border text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl backdrop-blur-md border text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
               isAudioPlaying
                 ? 'bg-amber-400 border-amber-300 text-neutral-950'
                 : 'bg-black/55 border-amber-400/50 text-amber-300 hover:bg-black/75'
@@ -2233,55 +2440,63 @@ export default function App() {
             {isAudioPlaying ? (
               <>
                 <Volume2 className="w-3.5 h-3.5 text-neutral-950" />
-                Music Driving ({metrics.shaderTimeScale.toFixed(2)}x)
+                <span>Music On</span>
               </>
             ) : (
               <>
                 <VolumeX className="w-3.5 h-3.5 text-amber-400" />
-                Play Music to Animate
+                <span>Play Music</span>
               </>
             )}
           </button>
 
           <button
             type="button"
-            onClick={() => {
-              const next = !isAnimatingSliders;
-              setIsAnimatingSliders(next);
-              if (next && musicDrivesTime && !isAudioPlaying) {
-                void toggleAudioRef.current?.();
-              }
-            }}
-            className={`inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl backdrop-blur-md border text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              isAnimatingSliders
-                ? 'bg-amber-400 border-amber-300 text-neutral-950'
-                : 'bg-black/55 border-white/10 text-white hover:bg-black/75'
+            onClick={() => setFollowMouse((prev) => !prev)}
+            title="Toggle Mouse Follow (Shortcut: M)"
+            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl backdrop-blur-md border text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              followMouse
+                ? 'bg-amber-500/25 border-amber-400 text-amber-200 hover:bg-amber-500/35'
+                : 'bg-black/55 border-white/15 text-neutral-200 hover:bg-black/75'
             }`}
           >
-            <Activity
-              className={`w-3.5 h-3.5 ${
-                isAnimatingSliders ? 'text-neutral-950' : 'text-amber-400'
-              }`}
-            />
-            {isAnimatingSliders
-              ? `Animating Active (${activeOrderedLayers.length})`
-              : `Animate Active (${activeOrderedLayers.length})`}
+            {followMouse ? (
+              <>
+                <MousePointer className="w-3.5 h-3.5 text-amber-400" />
+                <span>Mouse Follow (M)</span>
+              </>
+            ) : (
+              <>
+                <Lock className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Mouse Locked (M)</span>
+              </>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleLockAndCenterMouse}
+            title="Center shader origin to (0, 0) and lock mouse (Shortcut: C)"
+            className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl bg-black/55 backdrop-blur-md border border-white/10 text-xs font-medium text-neutral-200 hover:text-white hover:bg-black/75 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <Crosshair className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Center (C)</span>
           </button>
 
           <button
             type="button"
             onClick={() => setIsPaused((prev) => !prev)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-black/55 backdrop-blur-md border border-white/10 text-xs font-medium text-white hover:bg-black/75 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-black/55 backdrop-blur-md border border-white/10 text-xs font-medium text-white hover:bg-black/75 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             {isPaused ? (
               <>
                 <Play className="w-3.5 h-3.5 text-amber-400" />
-                Resume Time
+                <span>Resume</span>
               </>
             ) : (
               <>
                 <Pause className="w-3.5 h-3.5 text-amber-400" />
-                Pause Time
+                <span>Pause</span>
               </>
             )}
           </button>
@@ -2290,17 +2505,17 @@ export default function App() {
             <button
               type="button"
               onClick={handleToggleCollapseBoth}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-black/55 backdrop-blur-md border border-white/10 text-xs font-medium text-white hover:bg-black/75 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-black/55 backdrop-blur-md border border-white/10 text-xs font-medium text-white hover:bg-black/75 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               {bothPanelsCollapsed ? (
                 <>
                   <Maximize2 className="w-3.5 h-3.5 text-amber-400" />
-                  Expand Panels
+                  <span>Expand</span>
                 </>
               ) : (
                 <>
                   <Minimize2 className="w-3.5 h-3.5 text-neutral-300" />
-                  Collapse Panels
+                  <span>Collapse</span>
                 </>
               )}
             </button>
@@ -2309,17 +2524,17 @@ export default function App() {
           <button
             type="button"
             onClick={() => setHudVisible((prev) => !prev)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-black/55 backdrop-blur-md border border-white/10 text-xs font-medium text-white hover:bg-black/75 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-black/55 backdrop-blur-md border border-white/10 text-xs font-medium text-white hover:bg-black/75 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             {hudVisible ? (
               <>
                 <EyeOff className="w-3.5 h-3.5 text-neutral-300" />
-                Hide Controls
+                <span>Hide UI</span>
               </>
             ) : (
               <>
                 <Eye className="w-3.5 h-3.5 text-amber-400" />
-                Show Controls
+                <span>Show UI</span>
               </>
             )}
           </button>

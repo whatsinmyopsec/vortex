@@ -84,9 +84,9 @@ export const AudioSynthPanel: React.FC<AudioSynthPanelProps> = ({
   const [expandedArch, setExpandedArch] = useState<string | null>('audioReactive');
   const [songUrlInput, setSongUrlInput] = useState<string>(
     DEFAULT_SYNTH_PARAMS.customAudioUrl ||
-      'https://ice1.somafm.com/synphaera-128-mp3'
+      PRESET_SONG_LINKS[0].url
   );
-  const [showPresetLinks, setShowPresetLinks] = useState<boolean>(false);
+  const [showPresetLinks, setShowPresetLinks] = useState<boolean>(true);
   const [urlError, setUrlError] = useState<string | null>(null);
   const [isResolvingUrl, setIsResolvingUrl] = useState<boolean>(false);
 
@@ -176,6 +176,7 @@ export const AudioSynthPanel: React.FC<AudioSynthPanelProps> = ({
         audioBandsRef.current.rms = liveBands.rms;
         audioBandsRef.current.reactivity = liveBands.reactivity;
         audioBandsRef.current.beatPulse = liveBands.beatPulse;
+        audioBandsRef.current.kickZoom = liveBands.kickZoom;
         audioBandsRef.current.groovePhase = liveBands.groovePhase;
         audioBandsRef.current.isPlaying = liveBands.isPlaying;
         audioBandsRef.current.musicDrivesTime = liveBands.musicDrivesTime;
@@ -189,6 +190,7 @@ export const AudioSynthPanel: React.FC<AudioSynthPanelProps> = ({
         audioBandsRef.current.high = 0;
         audioBandsRef.current.rms = 0;
         audioBandsRef.current.beatPulse = 0;
+        audioBandsRef.current.kickZoom = 0;
         audioBandsRef.current.isPlaying = false;
       }
 

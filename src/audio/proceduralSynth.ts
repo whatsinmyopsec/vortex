@@ -62,6 +62,9 @@ export function estimateSeedBpmFromTrack(
   if (combined.includes('astral_drift') || combined.includes('astral drift')) return 94;
   if (combined.includes('suburbsofgoa') || combined.includes('suburbs of goa')) return 118;
   if (combined.includes('defcon')) return 128;
+  if (combined.includes('cliqhop')) return 112;
+  if (combined.includes('thetrip')) return 126;
+  if (combined.includes('beatblender')) return 118;
   if (combined.includes('synphaera')) return 86;
   if (combined.includes('spacestation')) return 96;
   if (combined.includes('vaporwaves')) return 104;
@@ -77,6 +80,13 @@ export function estimateSeedBpmFromTrack(
     combined.includes('melodic female')
   ) {
     return 122;
+  }
+  if (
+    combined.includes('FX8XlSwbFVdWUJ76'.toLowerCase()) ||
+    combined.includes('0c18da5a-ea87-4361-ab1a-84de3c1a1c3f') ||
+    combined.includes('i decide')
+  ) {
+    return 126;
   }
   return fallbackBpm;
 }
@@ -130,70 +140,76 @@ export interface PresetSongLink {
 
 export const PRESET_SONG_LINKS: PresetSongLink[] = [
   {
-    id: 'somafm-synphaera',
-    label: 'Synphaera (Live Stream)',
-    subtitle: 'Space Ambient · Modern Electronic · Synphaera',
-    url: 'https://ice1.somafm.com/synphaera-128-mp3',
-  },
-  {
-    id: 'suno-peak-satisfaction',
-    label: 'Peak Satisfaction (lX9vCx1RSB4d9bOP)',
-    subtitle: 'Peak Satisfaction (The Unboxing) · Suno AI',
-    url: 'https://suno.com/s/lX9vCx1RSB4d9bOP',
-  },
-  {
-    id: 'suno-featured',
-    label: 'Suno Track (35tZN3FK6QJCpt0S)',
-    subtitle: 'Bro what the ohio rizzler mew gyatt fanu · Suno AI',
-    url: 'https://suno.com/s/35tZN3FK6QJCpt0S',
-  },
-  {
-    id: 'suno-melodic-echoing',
-    label: 'Melodic Echoing (6ITmtiP9NU83f2Kj)',
-    subtitle: '(melodic female, echoing) · Suno AI',
-    url: 'https://suno.com/s/6ITmtiP9NU83f2Kj',
-  },
-  {
-    id: 'suno-i-decide',
-    label: 'I decide (FX8XlSwbFVdWUJ76)',
-    subtitle: 'I decide · Suno AI',
-    url: 'https://suno.com/s/FX8XlSwbFVdWUJ76',
-  },
-  {
-    id: 'somafm-defcon',
-    label: 'DEF CON Radio (Live Stream)',
-    subtitle: 'Dark Electro · Glitch · Hacker Beats',
-    url: 'https://ice1.somafm.com/defcon-128-mp3',
-  },
-  {
-    id: 'somafm-spacestation',
-    label: 'Space Station Soma (Live Stream)',
-    subtitle: 'Deep Space Electronica · Midtempo',
-    url: 'https://ice1.somafm.com/spacestation-128-mp3',
-  },
-  {
-    id: 'somafm-goa',
-    label: 'Suburbs of Goa (Live Stream)',
-    subtitle: 'Psytrance · Asian-influenced Beats',
-    url: 'https://ice1.somafm.com/suburbsofgoa-128-mp3',
-  },
-  {
-    id: 'somafm-vaporwaves',
-    label: 'Vaporwaves FM (Live Stream)',
-    subtitle: 'Synthwave · Future Funk · Chillwave',
-    url: 'https://ice1.somafm.com/vaporwaves-128-mp3',
-  },
-  {
     id: 'astral-drift-link',
-    label: 'Astral Drift (Studio Master)',
-    subtitle: '94 BPM Heavy Bass & Crunchy Tone',
+    label: '★ Astral Drift (Heavy Bass Master)',
+    subtitle: '94 BPM Heavy Sub-Bass Drops & Crunchy Reese · Best for Bass Zoom',
     url: `${APP_BASE_URL}assets/aistudio/Astral_Drift_-_Heavy_Bass___Crunchy_Tone_dd9fd1be.mp3`,
   },
   {
     id: 'weightless-link',
-    label: 'Weightless (Studio Master)',
-    subtitle: '174 BPM Liquid DnB & Ethereal Choir',
+    label: '★ Weightless (174 BPM DnB Bass)',
+    subtitle: '174 BPM Punchy 2-Step Kicks & Deep Sub Rollers · Studio Master',
     url: `${APP_BASE_URL}assets/aistudio/Weightless_f4356b7d.mp3`,
+  },
+  {
+    id: 'suno-i-decide',
+    label: '★ I Decide (Suno Bass Drop)',
+    subtitle: 'Punchy Kick & Bassline Groove · Suno AI (FX8XlSwbFVdWUJ76)',
+    url: 'https://suno.com/s/FX8XlSwbFVdWUJ76',
+  },
+  {
+    id: 'suno-peak-satisfaction',
+    label: '★ Peak Satisfaction (Suno)',
+    subtitle: '124 BPM Electro Bass & Beats · Suno AI (lX9vCx1RSB4d9bOP)',
+    url: 'https://suno.com/s/lX9vCx1RSB4d9bOP',
+  },
+  {
+    id: 'somafm-cliqhop',
+    label: '★ Cliqhop IDM (Heavy Bass Stream)',
+    subtitle: '112 BPM IDM Sub-Bass, Glitch Kicks & Heavy Beats · SomaFM',
+    url: 'https://ice1.somafm.com/cliqhop-128-mp3',
+  },
+  {
+    id: 'somafm-defcon',
+    label: '★ DEF CON Radio (128 BPM Electro)',
+    subtitle: '128 BPM Dark Electro · Heavy Industrial Bass · SomaFM',
+    url: 'https://ice1.somafm.com/defcon-128-mp3',
+  },
+  {
+    id: 'somafm-thetrip',
+    label: 'The Trip (126 BPM 4x4 Kick)',
+    subtitle: 'Driving Progressive House & Trance 4x4 Kicks · SomaFM',
+    url: 'https://ice1.somafm.com/thetrip-128-mp3',
+  },
+  {
+    id: 'somafm-beatblender',
+    label: 'Beat Blender (Deep House Bass)',
+    subtitle: '118 BPM Deep House & Downtempo Basslines · SomaFM',
+    url: 'https://ice1.somafm.com/beatblender-128-mp3',
+  },
+  {
+    id: 'suno-melodic-echoing',
+    label: 'Melodic Echoing (6ITmtiP9NU83f2Kj)',
+    subtitle: '122 BPM Melodic Electronic · Suno AI',
+    url: 'https://suno.com/s/6ITmtiP9NU83f2Kj',
+  },
+  {
+    id: 'suno-featured',
+    label: 'Suno Track (35tZN3FK6QJCpt0S)',
+    subtitle: '132 BPM Hyper-Bass · Suno AI',
+    url: 'https://suno.com/s/35tZN3FK6QJCpt0S',
+  },
+  {
+    id: 'somafm-goa',
+    label: 'Suburbs of Goa (Live Stream)',
+    subtitle: '118 BPM Psytrance & Tribal Bass · SomaFM',
+    url: 'https://ice1.somafm.com/suburbsofgoa-128-mp3',
+  },
+  {
+    id: 'somafm-synphaera',
+    label: 'Synphaera (Ambient Stream)',
+    subtitle: 'Space Ambient (Low Beats) · Synphaera',
+    url: 'https://ice1.somafm.com/synphaera-128-mp3',
   },
 ];
 
@@ -764,8 +780,8 @@ export const DEFAULT_SYNTH_PARAMS: SynthParams = {
   masterVolume: 0.82,
   cursorCoupling: true,
   audioSource: 'customUrl',
-  customAudioUrl: 'https://ice1.somafm.com/synphaera-128-mp3',
-  customAudioTitle: 'Synphaera (Live Stream)',
+  customAudioUrl: `${APP_BASE_URL}assets/aistudio/Astral_Drift_-_Heavy_Bass___Crunchy_Tone_dd9fd1be.mp3`,
+  customAudioTitle: 'Astral Drift — Heavy Bass & Crunchy Tone (94 BPM)',
 
   audioReactive: {
     enabled: true,
@@ -1377,6 +1393,8 @@ export class ProceduralAudioEngine {
   private lastOnsetTimeSec = 0;
   private onsetIntervalsSec: number[] = [];
   private prevSubFlux = 0;
+  private bassFloor = 0;
+  private bassZoomImpulse = 0;
 
   private rafId: number | null = null;
   private startTime = 0;
@@ -1964,8 +1982,10 @@ export class ProceduralAudioEngine {
     }
 
     this.analyser = ctx.createAnalyser();
-    this.analyser.fftSize = 512;
-    this.analyser.smoothingTimeConstant = 0.93;
+    this.analyser.fftSize = 1024;
+    this.analyser.minDecibels = -85;
+    this.analyser.maxDecibels = -12;
+    this.analyser.smoothingTimeConstant = 0.52;
     this.freqBins = new Uint8Array(this.analyser.frequencyBinCount);
 
     this.masterGain.connect(compressor);
@@ -2519,6 +2539,7 @@ export class ProceduralAudioEngine {
     }
 
     this.kickEnv = Math.min(1.0, this.kickEnv + 0.85 * velocity);
+    this.bassZoomImpulse = Math.min(2.4, this.bassZoomImpulse + 1.55 * velocity);
   }
 
   /**
@@ -2569,6 +2590,7 @@ export class ProceduralAudioEngine {
       this.subFilter.frequency.exponentialRampToValueAtTime(baseCut + 70, now + 0.28);
       this.telemetry.subCutoffHz = peakCut;
     }
+    this.bassZoomImpulse = Math.min(2.2, this.bassZoomImpulse + 1.25 * velocity);
   }
 
   /**
@@ -3527,23 +3549,31 @@ export class ProceduralAudioEngine {
     this.snareEnv *= envDecay;
     this.pluckEnv *= Math.exp(-dt * 4.2);
     this.hatEnv *= Math.exp(-dt * 4.8);
+    // Snappy decay for camera zoom impulse so every kick/bass note punches in and snaps back
+    this.bassZoomImpulse *= Math.exp(-dt * 8.8);
 
     this.analyser.getByteFrequencyData(this.freqBins);
 
+    // Bins 1..6 (~43Hz - 258Hz at 1024 FFT): blend mean + peak bin so single-note basslines (50-120Hz) register at full strength
     let subSum = 0;
-    for (let i = 0; i <= 4; i++) subSum += this.freqBins[i];
-    const rawSubNorm = subSum / (5 * 255);
-    let fftSub = Math.pow(Math.max(0, rawSubNorm - 0.08) / 0.92, 1.1);
+    let subPeak = 0;
+    for (let i = 1; i <= 6; i++) {
+      const binVal = this.freqBins[i];
+      subSum += binVal;
+      if (binVal > subPeak) subPeak = binVal;
+    }
+    const rawSubNorm = (subSum / (6 * 255)) * 0.52 + (subPeak / 255) * 0.48;
+    let fftSub = Math.pow(Math.max(0, rawSubNorm - 0.06) / 0.94, 1.05);
 
     let midSum = 0;
-    for (let i = 5; i <= 20; i++) midSum += this.freqBins[i];
-    const rawMidNorm = midSum / (16 * 255);
-    let fftMid = Math.pow(Math.max(0, rawMidNorm - 0.06) / 0.94, 1.1);
+    for (let i = 7; i <= 36; i++) midSum += this.freqBins[i];
+    const rawMidNorm = midSum / (30 * 255);
+    let fftMid = Math.pow(Math.max(0, rawMidNorm - 0.05) / 0.95, 1.08);
 
     let highSum = 0;
-    for (let i = 21; i <= 80; i++) highSum += this.freqBins[i];
-    const rawHighNorm = Math.min(1.0, (highSum / (60 * 255)) * 2.1);
-    let fftHigh = Math.pow(rawHighNorm, 1.08);
+    for (let i = 37; i <= 150; i++) highSum += this.freqBins[i];
+    const rawHighNorm = Math.min(1.0, (highSum / (114 * 255)) * 2.2);
+    let fftHigh = Math.pow(rawHighNorm, 1.06);
 
     const activeEl = this.usingCorsFallback
       ? this.corsFallbackAudioEl
@@ -3564,23 +3594,24 @@ export class ProceduralAudioEngine {
       const fallbackBeatRate = Math.max(60, this.detectedTrackBpm) / 60.0;
       const t = wallNow * fallbackBeatRate;
       const beatWave = Math.pow(0.5 + 0.5 * Math.sin(t * Math.PI * 2.0), 3.0);
-      fftSub = 0.34 + beatWave * 0.48;
+      fftSub = 0.34 + beatWave * 0.52;
       fftMid = 0.28 + (0.5 + 0.5 * Math.sin(t * 1.618 + 0.8)) * 0.44;
       fftHigh = 0.22 + (0.5 + 0.5 * Math.cos(t * 3.14 + 1.7)) * 0.4;
     }
 
-    // Spectral flux transient kick detector + real-time beat-interval BPM estimator for external tracks & song links
+    // Spectral flux transient kick & bass-note onset detector
     const subFlux = Math.max(0, fftSub - this.prevFftSub);
     this.prevFftSub = fftSub;
-    if (isExternalTrack && subFlux > 0.04) {
-      this.kickEnv = Math.min(1.0, this.kickEnv + subFlux * 3.2);
+    if (isExternalTrack && subFlux > 0.012) {
+      this.kickEnv = Math.min(1.35, this.kickEnv + subFlux * 5.2);
+      this.bassZoomImpulse = Math.min(2.4, this.bassZoomImpulse + subFlux * 8.5);
 
       // Detect distinct kick/bass onset peaks to estimate external tune BPM in real time
       if (
         !this.usingCorsFallback &&
-        subFlux > 0.052 &&
+        subFlux > 0.038 &&
         subFlux >= this.prevSubFlux &&
-        fftSub > 0.26
+        fftSub > 0.22
       ) {
         const sinceLastOnset = now - this.lastOnsetTimeSec;
         if (sinceLastOnset >= 0.28) {
@@ -3673,16 +3704,32 @@ export class ProceduralAudioEngine {
     const beatLerp = rawBeat > this.smoothedBands.beatPulse ? beatAttack : beatRelease;
     this.smoothedBands.beatPulse += (rawBeat - this.smoothedBands.beatPulse) * beatLerp;
 
-    // Fast-attack (~38ms), elastic-release (~165ms) Kick + Bassline optical zoom envelope
-    // Responds both to sharp kick transients (this.kickEnv / subFlux) and sustained heavy basslines (fftSub)
-    const bassLineSustain = Math.pow(Math.max(0, fftSub - 0.14) / 0.86, 1.15);
-    const rawKickZoom = Math.min(
-      1.35,
-      (this.kickEnv * 0.92 + bassLineSustain * 0.85) *
-        Math.max(0.5, this.params.audioReactive.subPumpStargate * 0.85)
+    // Adaptive bass floor tracks quiet intros/breakdowns so bassline entrances trigger a strong zoom surge
+    if (fftSub < this.bassFloor) {
+      this.bassFloor += (fftSub - this.bassFloor) * Math.min(1.0, dt * 3.6);
+    } else {
+      this.bassFloor += (fftSub - this.bassFloor) * Math.min(1.0, dt * 0.45);
+    }
+    const bassAboveFloor = Math.max(0, fftSub - this.bassFloor * 0.78);
+
+    // High-contrast, fast-attack (~22ms), elastic-release (~105ms) Kick + Bassline optical zoom envelope:
+    // Uses sharp rhythmic groove pulses (0 -> 1) and transient impulses so the camera visibly SLAMS in and pulls back out on every beat/bass note
+    const bassLinePresence = Math.pow(Math.max(0, fftSub - 0.12) / 0.88, 1.05);
+    const sharpGroovePulse = Math.pow(
+      0.5 + 0.5 * Math.sin(this.groovePhase * 2.0),
+      2.2
     );
-    const zoomAttack = 1.0 - Math.exp(-dt * 26.0);
-    const zoomRelease = 1.0 - Math.exp(-dt * 6.0);
+    const bassDynamicSwing = Math.max(0, fftSub - this.smoothedBands.sub) * 4.2;
+    const rawKickZoom = Math.min(
+      2.5,
+      (this.bassZoomImpulse * 1.25 +
+        subFlux * 5.5 +
+        bassAboveFloor * 1.45 +
+        bassLinePresence * (sharpGroovePulse * 1.35 + bassDynamicSwing)) *
+        Math.max(0.75, this.params.audioReactive.subPumpStargate)
+    );
+    const zoomAttack = 1.0 - Math.exp(-dt * 42.0);
+    const zoomRelease = 1.0 - Math.exp(-dt * 9.2);
     const zoomLerp =
       rawKickZoom > this.smoothedBands.kickZoom ? zoomAttack : zoomRelease;
     this.smoothedBands.kickZoom +=
