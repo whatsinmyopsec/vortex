@@ -113,7 +113,7 @@ export default function App() {
   const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
   const [presetCategory, setPresetCategory] = useState<'all' | PresetCategory>('all');
   const [activePresetId, setActivePresetId] = useState<string>(
-    'klein4d-mandala-starfield-26-10-3'
+    'rotating-neon-triangle-portal-30'
   );
   const [presetFadeDuration, setPresetFadeDuration] = useState<number>(1.8);
   const [presetTransition, setPresetTransition] =
@@ -129,6 +129,7 @@ export default function App() {
     speed: 0.0,
     isPressed: false,
     shaderTimeScale: 0.0,
+    bassZoomLevel: 0.0,
   });
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1225,6 +1226,37 @@ export default function App() {
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                   </button>
+                </div>
+
+                {/* Kick & Bassline Optical Zoom Punch Control */}
+                <div className="px-2.5 py-1.5 rounded-lg bg-white/[0.04] border border-white/10 space-y-1">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-medium text-neutral-200 flex items-center gap-1.5">
+                      <Zap className="w-3 h-3 text-amber-400" />
+                      Kick &amp; Bass Zoom Punch
+                    </span>
+                    <div className="flex items-center gap-1.5 font-mono">
+                      {(metrics.bassZoomLevel ?? 0) > 0.01 && (
+                        <span className="px-1.5 py-0.5 rounded bg-amber-400/20 border border-amber-400/40 text-[10px] text-amber-200">
+                          +{Math.round((metrics.bassZoomLevel ?? 0) * 100)}%
+                        </span>
+                      )}
+                      <span className="text-amber-300 font-semibold">
+                        {Math.round((state.bassZoomPunch ?? 0.45) * 100)}%
+                      </span>
+                    </div>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1.5}
+                    step={0.05}
+                    value={state.bassZoomPunch ?? 0.45}
+                    onChange={(e) =>
+                      updateCoreParam('bassZoomPunch', parseFloat(e.target.value))
+                    }
+                    className="w-full h-1.5 bg-white/15 rounded-lg appearance-none cursor-pointer accent-amber-400"
+                  />
                 </div>
               </div>
 

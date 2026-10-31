@@ -85,6 +85,7 @@ export interface ShaderState {
   trailZoomWarp?: number; // -0.03 - 0.03 radial zoom/swirl smear per feedback frame
   crtScanlines?: number; // 0.0 - 1.0 Sony Trinitron CRT scanlines & phosphor bloom
   ps2ColorMatrix?: number; // 0.0 - 1.0 Y2K PS2 BIOS cobalt/indigo/cyan color grade
+  bassZoomPunch?: number; // 0.0 - 1.5 Kick & Bassline optical visualizer zoom punch
 
   // Dynamic map of layerId -> { mix, values }
   layers: Record<string, LayerRuntimeState>;

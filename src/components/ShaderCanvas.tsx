@@ -13,6 +13,7 @@ export interface CursorMetrics {
   speed: number;
   isPressed: boolean;
   shaderTimeScale: number;
+  bassZoomLevel: number;
 }
 
 // Sub-parameters that multiply iTime in GLSL (their speed is already driven via integrated iTime)
@@ -209,6 +210,7 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
   const isPointerDownRef = useRef<boolean>(false);
   const pulseRef = useRef<number>(0);
   const smoothedTimeScaleRef = useRef<number>(0.0);
+  const smoothedBassZoomRef = useRef<number>(0.0);
   const orbitPhaseRef = useRef<number>(0.0);
 
   useEffect(() => {
@@ -517,6 +519,7 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
         uAudioMid: context.getUniformLocation(prog, 'uAudioMid'),
         uAudioHigh: context.getUniformLocation(prog, 'uAudioHigh'),
         uAudioReactivity: context.getUniformLocation(prog, 'uAudioReactivity'),
+        uBassZoom: context.getUniformLocation(prog, 'uBassZoom'),
       };
 
       // Dynamically resolve uniform locations for all registered shader layers
@@ -660,6 +663,19 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
 
       accumulatedTime += dt * smoothedTimeScaleRef.current;
 
+      // 60 FPS fast-attack, elastic-release Kick & Bassline optical zoom envelope
+      const rawKickEnv =
+        !isPausedRef.current && bands.isPlaying && bands.reactivity > 0
+          ? (bands.kickZoom ?? bands.sub * 0.75) *
+            Math.min(1.6, Math.max(0.35, bands.reactivity))
+          : 0.0;
+      const zoomRate = rawKickEnv > smoothedBassZoomRef.current ? 28.0 : 6.8;
+      smoothedBassZoomRef.current +=
+        (rawKickEnv - smoothedBassZoomRef.current) * (1.0 - Math.exp(-dt * zoomRate));
+      if (smoothedBassZoomRef.current < 0.001 && rawKickEnv === 0) {
+        smoothedBassZoomRef.current = 0;
+      }
+
       if (autoOrbitRef.current) {
         const orbitRate = bands.musicDrivesTime
           ? smoothedTimeScaleRef.current * 0.75
@@ -756,11 +772,17 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
           gl.uniform1f(core.uCrtScanlines, passState.crtScanlines ?? 0.0);
           gl.uniform1f(core.uPs2ColorMatrix, passState.ps2ColorMatrix ?? 0.0);
 
-          // Bind real-time Web Audio frequency band uniforms
+          // Bind real-time Web Audio frequency band uniforms + Kick/Bassline Optical Zoom
+          const punchStrength = passState.bassZoomPunch ?? 0.45;
+          const effectiveBassZoom = Math.min(
+            1.25,
+            Math.max(0.0, smoothedBassZoomRef.current * punchStrength * 0.68)
+          );
           gl.uniform1f(core.uAudioSub, bands.sub);
           gl.uniform1f(core.uAudioMid, bands.mid);
           gl.uniform1f(core.uAudioHigh, bands.high);
           gl.uniform1f(core.uAudioReactivity, bands.reactivity);
+          gl.uniform1f(core.uBassZoom, effectiveBassZoom);
 
           // Dynamically bind uniforms for every registered shader layer
           for (let layerIdx = 0; layerIdx < SHADER_LAYERS.length; layerIdx++) {
@@ -889,9 +911,11 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
           const writeTex = histPingPong === 0 ? texHistB : texHistA;
 
           const baseZoomWarp = s.trailZoomWarp ?? 0.009;
+          const punchStrength = s.bassZoomPunch ?? 0.45;
           const audioZoomPulse =
             bands.isPlaying && bands.reactivity > 0
-              ? baseZoomWarp * (1.0 + bands.sub * 0.55 + bands.beatPulse * 0.35)
+              ? baseZoomWarp * (1.0 + bands.sub * 0.55 + bands.beatPulse * 0.35) +
+                smoothedBassZoomRef.current * punchStrength * 0.018
               : baseZoomWarp;
           const rotWarp =
             0.0025 * Math.sin(accumulatedTime * 0.45) * (s.swirlTwist >= 0 ? 1.0 : -1.0);
@@ -969,6 +993,8 @@ export const ShaderCanvas: React.FC<ShaderCanvasProps> = ({
           speed,
           isPressed: isPointerDownRef.current,
           shaderTimeScale: smoothedTimeScaleRef.current,
+          bassZoomLevel:
+            smoothedBassZoomRef.current * (s.bassZoomPunch ?? 0.45),
         });
       }
 

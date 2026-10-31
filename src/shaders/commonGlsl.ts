@@ -45,8 +45,11 @@ float fbm(vec2 p) {
 `;
 
 export const MOUSE_DISTORTION_GLSL = `
-    vec2 p0 = (fc - 0.5 * iResolution.xy) / iResolution.y;
-    vec2 m = uMouse;
+    // Audio-Reactive Kick & Bassline Optical Zoom:
+    // Zooms the visualizer camera inward when a kick transient or heavy bassline comes in
+    float bassZoomScale = 1.0 / (1.0 + max(0.0, uBassZoom));
+    vec2 p0 = ((fc - 0.5 * iResolution.xy) / iResolution.y) * bassZoomScale;
+    vec2 m = uMouse * bassZoomScale;
 
     vec2 dVec = p0 - m;
     float dMouse = length(dVec);

@@ -10,6 +10,7 @@ export interface AudioBandLevels {
   rms: number; // 0.0 - 1.0 (Master RMS energy)
   reactivity: number; // 0.0 - 2.5 (Shader audio-reactivity multiplier)
   beatPulse: number; // 0.0 - 1.0 (Smooth rhythmic transient envelope from Kick/Snare/Pluck)
+  kickZoom: number; // 0.0 - 1.5 (Fast-attack, spring-release Kick + Bassline optical zoom envelope)
   groovePhase: number; // Continuous BPM-locked musical phase
   isPlaying: boolean; // True when procedural synth is actively playing
   musicDrivesTime: boolean; // When true, music controls shader iTime velocity & parameter morphing
@@ -25,6 +26,7 @@ export const DEFAULT_AUDIO_BAND_LEVELS: AudioBandLevels = {
   rms: 0,
   reactivity: 1.0,
   beatPulse: 0,
+  kickZoom: 0,
   groovePhase: 0,
   isPlaying: true,
   musicDrivesTime: true,
@@ -3507,6 +3509,7 @@ export class ProceduralAudioEngine {
       this.smoothedBands.high = 0;
       this.smoothedBands.rms = 0;
       this.smoothedBands.beatPulse = 0;
+      this.smoothedBands.kickZoom = 0;
       this.smoothedBands.isPlaying = false;
       return;
     }
@@ -3669,6 +3672,21 @@ export class ProceduralAudioEngine {
     const beatRelease = 1.0 - Math.exp(-dt * 2.2);
     const beatLerp = rawBeat > this.smoothedBands.beatPulse ? beatAttack : beatRelease;
     this.smoothedBands.beatPulse += (rawBeat - this.smoothedBands.beatPulse) * beatLerp;
+
+    // Fast-attack (~38ms), elastic-release (~165ms) Kick + Bassline optical zoom envelope
+    // Responds both to sharp kick transients (this.kickEnv / subFlux) and sustained heavy basslines (fftSub)
+    const bassLineSustain = Math.pow(Math.max(0, fftSub - 0.14) / 0.86, 1.15);
+    const rawKickZoom = Math.min(
+      1.35,
+      (this.kickEnv * 0.92 + bassLineSustain * 0.85) *
+        Math.max(0.5, this.params.audioReactive.subPumpStargate * 0.85)
+    );
+    const zoomAttack = 1.0 - Math.exp(-dt * 26.0);
+    const zoomRelease = 1.0 - Math.exp(-dt * 6.0);
+    const zoomLerp =
+      rawKickZoom > this.smoothedBands.kickZoom ? zoomAttack : zoomRelease;
+    this.smoothedBands.kickZoom +=
+      (rawKickZoom - this.smoothedBands.kickZoom) * zoomLerp;
 
     const bpmScale = this.params.audioReactive.bpmLinksDrive
       ? computeBpmDriveScale(effectiveBpm)

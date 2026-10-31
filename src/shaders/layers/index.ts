@@ -2865,7 +2865,566 @@ vec3 evalPs2VlmVisualizer(vec2 coord, float r, float a) {
 };
 
 /**
- * Master Modular Shader Layer Registry (Ordered 01 through 28, unmasked full-viewport layers).
+ * 29. Neon Crystal Ice Corridor (3D Raymarched Rounded-Square Crystalline Cave & Neon Portal Arches)
+ * Recreates the 3D rounded-square amethyst/lavender crystalline ice cave tunnel lined with
+ * glowing neon rounded-square portal frames, wet rock normal-mapped specular reflections,
+ * and a luminous cyan-white misty horizon.
+ */
+export const neonCorridorLayer: ShaderLayerDefinition = {
+  id: 'neoncorridor',
+  name: '29. Neon Crystal Ice Corridor',
+  shortName: 'Neon Corridor',
+  description:
+    '3D raymarched rounded-square amethyst & ice-crystal cave tunnel illuminated by glowing violet, warm-gold, and cyan neon portal frames with wet rock specular reflections and misty horizon bloom.',
+  mixUniform: 'uMixNeonCorridor',
+  defaultMix: 0.96,
+  lfoMix: { freq: 0.22, phase: 0.4, min: 0.45, max: 1.0, decimals: 2 },
+  subParams: [
+    {
+      key: 'portalSpacing',
+      uniformName: 'uCorridorSpacing',
+      label: 'Neon Arch Density',
+      min: 1.0,
+      max: 3.2,
+      step: 0.05,
+      defaultValue: 1.85,
+      format: (v) => `${v.toFixed(2)}x`,
+      lfo: { freq: 0.16, phase: 0.8, min: 1.35, max: 2.45, decimals: 2 },
+    },
+    {
+      key: 'rockRelief',
+      uniformName: 'uCorridorRelief',
+      label: 'Crystal Cave Relief',
+      min: 0.2,
+      max: 2.0,
+      step: 0.05,
+      defaultValue: 1.15,
+      format: (v) => `${v.toFixed(2)}x`,
+      lfo: { freq: 0.19, phase: 1.7, min: 0.75, max: 1.55, decimals: 2 },
+    },
+    {
+      key: 'neonBloom',
+      uniformName: 'uCorridorBloom',
+      label: 'Neon & Horizon Glow',
+      min: 0.4,
+      max: 2.5,
+      step: 0.05,
+      defaultValue: 1.35,
+      format: (v) => v.toFixed(2),
+      lfo: { freq: 0.27, phase: 2.5, min: 0.9, max: 1.95, decimals: 2 },
+    },
+  ],
+  glslFunction: `
+// Signed distance to a 2D rounded box (for rounded-square tunnel & neon frames)
+float sdRoundSquare2D(vec2 p, float halfSize, float cornerR) {
+    vec2 q = abs(p) - vec2(halfSize - cornerR);
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - cornerR;
+}
+
+// 3D crystalline rock & ice facet displacement field for the cave walls
+float corridorCrystalRelief(vec3 p) {
+    // Multi-frequency 3D triplanar / gyroidal crystal rock relief
+    vec3 q = p * 1.55;
+    float baseRock = sin(q.x * 2.1 + sin(q.z * 1.7)) * cos(q.y * 2.1 + cos(q.z * 1.4)) * 0.5 + 0.5;
+    float facet1 = abs(sin(q.x * 4.3 + q.z * 2.8) * cos(q.y * 4.1 - q.z * 2.5));
+    float facet2 = abs(cos(q.x * 8.2 - q.y * 5.6 + q.z * 4.7));
+    float noiseLayer = fbm(p.xy * 2.4 + vec2(p.z * 0.65, -p.z * 0.45));
+    // Sculpted jagged crystal pockets & rounded ice boulders
+    return (baseRock * 0.42 + (1.0 - facet1) * 0.34 + (1.0 - facet2) * 0.14 + noiseLayer * 0.35) - 0.52;
+}
+
+// Distance to the sculpted rounded-square cave wall
+float mapCorridorWall(vec3 p, float rockRelief) {
+    // Gentle organic tunnel wind
+    vec2 centerOff = vec2(sin(p.z * 0.18) * 0.08, cos(p.z * 0.15) * 0.06);
+    vec2 xy = p.xy - centerOff;
+    // Rounded-square tunnel radius: negative inside, 0 at wall
+    float tunnelRadius = 1.08;
+    float cornerR = 0.34;
+    float dSquare = sdRoundSquare2D(xy, tunnelRadius, cornerR);
+    // Distance from interior ray to outer wall is (-dSquare)
+    float wallDist = -dSquare;
+    // Carve 3D rock & crystal displacement into the cave walls
+    float disp = corridorCrystalRelief(p) * 0.18 * rockRelief;
+    return wallDist - disp;
+}
+
+// Distance & color for the repeating rounded-square neon portal arches along Z
+vec2 mapNeonPortalFrame(vec3 p, float zSpacing, out float frameIndex) {
+    vec2 centerOff = vec2(sin(p.z * 0.18) * 0.08, cos(p.z * 0.15) * 0.06);
+    vec2 xy = p.xy - centerOff;
+
+    float cellZ = floor(p.z / zSpacing + 0.5);
+    frameIndex = cellZ;
+    float localZ = (p.z - cellZ * zSpacing);
+
+    // Neon rounded-square arch sits slightly proud of the sculpted rock wall
+    float archHalfSize = 0.98;
+    float archCornerR = 0.30;
+    float d2D = sdRoundSquare2D(xy, archHalfSize, archCornerR);
+    float dTube = length(vec2(d2D, localZ)) - 0.022;
+    return vec2(dTube, d2D);
+}
+
+// Color palette for each neon arch index (violet/lavender, warm peach-gold, icy cyan)
+vec3 getNeonArchPalette(float idx, float angleParam, float audioMid) {
+    float cyc = fract(idx * 0.3183 + angleParam * 0.12);
+    vec3 neonViolet = vec3(0.76, 0.42, 1.0);
+    vec3 neonMagenta = vec3(0.95, 0.46, 0.92);
+    vec3 warmGold = vec3(1.0, 0.84, 0.56);
+    vec3 icyCyan = vec3(0.52, 0.90, 1.0);
+
+    vec3 archCol = mix(neonViolet, neonMagenta, 0.5 + 0.5 * sin(idx * 1.7 + angleParam * 2.0));
+    archCol = mix(archCol, warmGold, smoothstep(0.55, 0.92, sin(idx * 2.1 - angleParam * 1.5 + audioMid * 0.8)));
+    archCol = mix(archCol, icyCyan, smoothstep(0.62, 0.95, cos(idx * 1.3 + angleParam * 2.4)));
+    return archCol;
+}
+
+vec3 evalNeonCrystalCorridor(vec2 coord, float portalDensity, float rockRelief, float neonBloom) {
+    float bass = clamp(uAudioSub * uAudioReactivity, 0.0, 2.0);
+    float mid  = clamp(uAudioMid * uAudioReactivity, 0.0, 2.0);
+    float high = clamp(uAudioHigh * uAudioReactivity, 0.0, 2.0);
+
+    // Spacing between consecutive neon rounded-square frames
+    float zSpacing = 2.65 / max(portalDensity, 0.5);
+
+    // Camera flying steadily forward down the crystalline corridor
+    float flySpeed = 1.85;
+    float camZ = iTime * flySpeed + bass * 0.12;
+    vec2 camSway = vec2(sin(iTime * 0.55) * 0.06, cos(iTime * 0.45) * 0.05);
+    vec3 ro = vec3(camSway, camZ);
+
+    // Subtle mouse look & perspective projection
+    vec2 look = uMouse * 0.35;
+    vec2 uv = coord * 1.35 + look * 0.25;
+    vec3 rd = normalize(vec3(uv, 1.25));
+
+    // Gentle camera roll sway
+    float roll = sin(iTime * 0.32) * 0.04;
+    mat2 rMat = mat2(cos(roll), -sin(roll), sin(roll), cos(roll));
+    rd.xy = rMat * rd.xy;
+
+    float t = 0.05;
+    float maxDist = 22.0;
+    vec3 volNeonGlow = vec3(0.0);
+    bool hitWall = false;
+
+    // 48-step sphere trace through the crystalline tunnel, accumulating neon arch bloom
+    for (int i = 0; i < 48; i++) {
+        vec3 p = ro + rd * t;
+        float dWall = mapCorridorWall(p, rockRelief);
+
+        float fIdx = 0.0;
+        vec2 dPortal = mapNeonPortalFrame(p, zSpacing, fIdx);
+        float dTube = dPortal.x;
+
+        // Accumulate volumetric neon tube core & bloom halo
+        float angleP = atan(p.y, p.x);
+        vec3 archCol = getNeonArchPalette(fIdx, angleP, mid);
+        float depthAtten = exp(-t * 0.085);
+
+        // Intense white-hot core + colored neon aura
+        float tubeCore = exp(-max(dTube, 0.0) * 52.0);
+        float tubeAura = 0.0024 / (dTube * dTube + 0.0016);
+        vec3 stepNeon = (vec3(1.0, 0.98, 1.0) * tubeCore * 1.35 + archCol * tubeAura) * depthAtten;
+
+        // Weight volumetric accumulation by safe step size so arches stay crisp
+        float stepDist = max(min(dWall * 0.68, max(dTube * 0.75, 0.035)), 0.025);
+        volNeonGlow += stepNeon * stepDist * (1.0 + bass * 0.28);
+
+        if (dWall < 0.006 || t > maxDist) {
+            hitWall = (dWall < 0.006);
+            break;
+        }
+        t += stepDist;
+    }
+
+    // Bright misty cyan-white volumetric horizon at the far end of the tunnel
+    float centerMist = exp(-length(uv) * 1.45);
+    vec3 horizonCol = mix(
+        vec3(0.68, 0.78, 0.98),
+        vec3(0.94, 0.98, 1.0),
+        clamp(centerMist * 1.25, 0.0, 1.0)
+    );
+
+    vec3 wallFinal = horizonCol;
+
+    if (hitWall) {
+        vec3 pHit = ro + rd * t;
+
+        // Compute 3D bumpy crystalline surface normal via finite differences
+        vec2 eps = vec2(0.012, 0.0);
+        vec3 n = normalize(vec3(
+            mapCorridorWall(pHit + eps.xyy, rockRelief) - mapCorridorWall(pHit - eps.xyy, rockRelief),
+            mapCorridorWall(pHit + eps.yxy, rockRelief) - mapCorridorWall(pHit - eps.yxy, rockRelief),
+            mapCorridorWall(pHit + eps.yyx, rockRelief) - mapCorridorWall(pHit - eps.yyx, rockRelief)
+        ));
+
+        // High-frequency micro-facet crystal sparkle normal perturbation
+        float micro1 = fbm(pHit.yz * 7.5 + pHit.x * 3.2);
+        float micro2 = fbm(pHit.xz * 7.5 - pHit.y * 3.2);
+        n = normalize(n + vec3(micro1 - 0.5, micro2 - 0.5, (micro1 - micro2) * 0.5) * 0.38 * rockRelief);
+
+        // Base amethyst / periwinkle / translucent ice-rock albedo
+        float rockTex = corridorCrystalRelief(pHit * 1.35) + 0.5;
+        vec3 deepAmethyst = vec3(0.16, 0.11, 0.30);
+        vec3 lavenderIce  = vec3(0.42, 0.36, 0.68);
+        vec3 cyanVein     = vec3(0.38, 0.66, 0.88);
+        vec3 baseRockCol  = mix(deepAmethyst, lavenderIce, clamp(rockTex, 0.0, 1.0));
+        baseRockCol = mix(baseRockCol, cyanVein, smoothstep(0.55, 0.9, micro1 * micro2 * 2.2) * 0.45);
+
+        // Ambient occlusion in deep rock crevices
+        float ao = clamp(0.45 + 0.55 * mapCorridorWall(pHit + n * 0.08, rockRelief) / 0.08, 0.25, 1.0);
+
+        // Evaluate direct diffuse, wet specular reflection, and subsurface scatter from the 3 nearest neon portal frames
+        float nearestCellZ = floor(pHit.z / zSpacing + 0.5);
+        vec3 totalDiff = vec3(0.0);
+        vec3 totalSpec = vec3(0.0);
+        vec3 reflDir = reflect(rd, n);
+
+        for (int k = -1; k <= 1; k++) {
+            float cellIdx = nearestCellZ + float(k);
+            float archZ = cellIdx * zSpacing;
+
+            // Closest point on the rounded-square arch in XY to pHit.xy
+            vec2 centerOff = vec2(sin(archZ * 0.18) * 0.08, cos(archZ * 0.15) * 0.06);
+            vec2 relXY = pHit.xy - centerOff;
+            float d2D = sdRoundSquare2D(relXY, 0.98, 0.30);
+            vec2 grad2D = normalize(relXY + 1e-4);
+            vec2 archPtXY = pHit.xy - grad2D * d2D;
+
+            vec3 lightPos = vec3(archPtXY, archZ);
+            vec3 lVec = lightPos - pHit;
+            float lDist = max(length(lVec), 0.06);
+            vec3 lDir = lVec / lDist;
+
+            float atten = 1.0 / (1.0 + lDist * lDist * 2.6);
+            float angleL = atan(lightPos.y, lightPos.x);
+            vec3 lightCol = getNeonArchPalette(cellIdx, angleL, mid);
+
+            // Wrap diffuse + translucent crystal subsurface scattering
+            float diff = max(dot(n, lDir) * 0.65 + 0.35, 0.0);
+            totalDiff += lightCol * diff * atten * 1.45;
+
+            // Wet glossy ice-rock specular highlight (Blinn-Phong + sharp crystal facet glint)
+            vec3 hVec = normalize(lDir - rd);
+            float ndoth = max(dot(n, hVec), 0.0);
+            float specWide = pow(ndoth, 16.0);
+            float specSharp = pow(ndoth, 64.0) * (1.2 + high * 0.8);
+            totalSpec += mix(lightCol, vec3(1.0), 0.45) * (specWide * 0.75 + specSharp * 1.35) * atten;
+        }
+
+        // Fresnel rim reflection of the bright cyan-white tunnel horizon along grazing cave walls
+        float fresnel = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
+        vec3 horizonBounce = horizonCol * fresnel * 0.55 * smoothstep(-0.2, 0.85, reflDir.z);
+
+        wallFinal = baseRockCol * (vec3(0.22, 0.20, 0.36) + totalDiff) * ao + totalSpec * ao + horizonBounce;
+
+        // Atmospheric depth fog blending the cave walls into the luminous cyan-white misty horizon
+        float fogFactor = 1.0 - exp(-t * t * 0.0085);
+        wallFinal = mix(wallFinal, horizonCol * (0.95 + 0.15 * neonBloom), clamp(fogFactor, 0.0, 1.0));
+    }
+
+    // Combine shaded crystalline cave walls, horizon mist, and volumetric neon portal arches
+    vec3 col = wallFinal + volNeonGlow * neonBloom;
+
+    // Soft filmic HDR tone curve so neon cores stay crisp white while halos bloom richly
+    col = col / (1.0 + col * 0.22);
+    return clamp(col * 1.18, 0.0, 3.0);
+}
+`,
+  glslEvalExpr:
+    'evalNeonCrystalCorridor(domainCoord, uCorridorSpacing, uCorridorRelief, uCorridorBloom)',
+  shadertoyHelper: (v) => {
+    const sp = (v.portalSpacing ?? 1.85).toFixed(2);
+    const rl = (v.rockRelief ?? 1.15).toFixed(2);
+    const bl = (v.neonBloom ?? 1.35).toFixed(2);
+    return `// Layer 29: Neon Crystal Ice Corridor
+float sdRoundSquare2D(vec2 p, float halfSize, float cornerR) {
+    vec2 q = abs(p) - vec2(halfSize - cornerR);
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - cornerR;
+}
+float corridorCrystalRelief(vec3 p) {
+    vec3 q = p * 1.55;
+    float baseRock = sin(q.x * 2.1 + sin(q.z * 1.7)) * cos(q.y * 2.1 + cos(q.z * 1.4)) * 0.5 + 0.5;
+    float facet1 = abs(sin(q.x * 4.3 + q.z * 2.8) * cos(q.y * 4.1 - q.z * 2.5));
+    float noiseLayer = fbm(p.xy * 2.4 + vec2(p.z * 0.65, -p.z * 0.45));
+    return (baseRock * 0.45 + (1.0 - facet1) * 0.35 + noiseLayer * 0.35) - 0.52;
+}
+float mapCorridorWall(vec3 p) {
+    vec2 xy = p.xy - vec2(sin(p.z * 0.18) * 0.08, cos(p.z * 0.15) * 0.06);
+    return -sdRoundSquare2D(xy, 1.08, 0.34) - corridorCrystalRelief(p) * 0.18 * ${rl};
+}
+vec3 evalNeonCrystalCorridor(vec2 coord) {
+    float zSpacing = 2.65 / ${sp};
+    vec3 ro = vec3(sin(iTime * 0.55) * 0.06, cos(iTime * 0.45) * 0.05, iTime * 1.85);
+    vec3 rd = normalize(vec3(coord * 1.35, 1.25));
+    float t = 0.05;
+    vec3 volGlow = vec3(0.0);
+    for (int i = 0; i < 48; i++) {
+        vec3 p = ro + rd * t;
+        float dWall = mapCorridorWall(p);
+        float cellZ = floor(p.z / zSpacing + 0.5);
+        float localZ = p.z - cellZ * zSpacing;
+        vec2 xy = p.xy - vec2(sin(p.z * 0.18) * 0.08, cos(p.z * 0.15) * 0.06);
+        float dTube = length(vec2(sdRoundSquare2D(xy, 0.98, 0.30), localZ)) - 0.022;
+        vec3 archCol = mix(vec3(0.76, 0.42, 1.0), vec3(1.0, 0.84, 0.56), 0.5 + 0.5 * sin(cellZ * 1.7 + atan(p.y, p.x) * 2.0));
+        float stepDist = max(min(dWall * 0.68, max(dTube * 0.75, 0.035)), 0.025);
+        volGlow += (vec3(1.0) * exp(-max(dTube, 0.0) * 52.0) * 1.35 + archCol * (0.0024 / (dTube * dTube + 0.0016))) * exp(-t * 0.085) * stepDist;
+        if (dWall < 0.006 || t > 22.0) break;
+        t += stepDist;
+    }
+    vec3 horizonCol = mix(vec3(0.68, 0.78, 0.98), vec3(0.94, 0.98, 1.0), exp(-length(coord) * 1.45));
+    vec3 baseWall = mix(vec3(0.22, 0.16, 0.42), horizonCol, 1.0 - exp(-t * t * 0.0085));
+    return clamp((baseWall + volGlow * ${bl}) * 1.1, 0.0, 3.0);
+}`;
+  },
+  shadertoyMain: (mix) =>
+    `    // Layer 29: Neon Crystal Ice Corridor
+    col += evalNeonCrystalCorridor(domainCoord) * ${mix.toFixed(2)};`,
+};
+
+/**
+ * 30. Rotating Neon Triangle Portal (Ultra-Crisp Plasma Core & Wet Mirror Floor)
+ * Enhances the 20-plane twisting equilateral triangle SDF tunnel with screen-space anti-aliased
+ * white-hot plasma cores, dual-stage neon cyan & hot magenta gas bloom, smooth near/far depth
+ * enveloping, and true planar mirror reflection on the wet cyber floor.
+ */
+export const neonTriangleLayer: ShaderLayerDefinition = {
+  id: 'neontriangle',
+  name: '30. Rotating Neon Triangle Portal',
+  shortName: 'Neon Triangle',
+  description:
+    '20-plane twisting neon cyan & hot-magenta equilateral triangle SDF portal with screen-space razor-sharp white plasma cores, controlled gas bloom, and wet mirror floor reflections.',
+  mixUniform: 'uMixNeonTriangle',
+  defaultMix: 1.0,
+  lfoMix: { freq: 0.24, phase: 0.6, min: 0.5, max: 1.0, decimals: 2 },
+  subParams: [
+    {
+      key: 'twistRate',
+      uniformName: 'uTriTwist',
+      label: 'Helix Twist & Spin',
+      min: 0.2,
+      max: 2.5,
+      step: 0.05,
+      defaultValue: 1.0,
+      format: (v) => `${v.toFixed(2)}x`,
+      lfo: { freq: 0.18, phase: 0.4, min: 0.65, max: 1.75, decimals: 2 },
+    },
+    {
+      key: 'crispness',
+      uniformName: 'uTriCrispness',
+      label: 'Laser Core Crispness',
+      min: 0.5,
+      max: 2.5,
+      step: 0.05,
+      defaultValue: 1.45,
+      format: (v) => `${v.toFixed(2)}x`,
+      lfo: { freq: 0.22, phase: 1.5, min: 1.0, max: 2.1, decimals: 2 },
+    },
+    {
+      key: 'floorReflect',
+      uniformName: 'uTriFloorReflect',
+      label: 'Wet Floor Reflection',
+      min: 0.0,
+      max: 1.8,
+      step: 0.05,
+      defaultValue: 1.1,
+      format: (v) => v.toFixed(2),
+      lfo: { freq: 0.2, phase: 2.3, min: 0.55, max: 1.45, decimals: 2 },
+    },
+  ],
+  glslFunction: `
+mat2 triPortalRot(float a) {
+    float s = sin(a), c = cos(a);
+    return mat2(c, -s, s, c);
+}
+
+// Exact 2D Equilateral Triangle SDF
+float sdEquilateralTri(vec2 p, float r) {
+    const float k = 1.7320508;
+    p.x = abs(p.x) - r;
+    p.y = p.y + r / k;
+    if (p.x + k * p.y > 0.0) p = vec2(p.x - k * p.y, -k * p.x - p.y) * 0.5;
+    p.x -= clamp(p.x, -2.0 * r, 0.0);
+    return -length(p) * sign(p.y);
+}
+
+// Evaluates the 20-slice neon triangle tunnel along a given ray UV (used for both direct view & wet floor reflection)
+vec3 traceNeonTriangleStack(vec2 rayUv, float twistScale, float crispness, float bass, float high, float isReflection) {
+    vec3 stackCol = vec3(0.0);
+    float forwardSpeed = 1.5 + bass * 0.18;
+    float pixelScale = 1.0 / max(iResolution.y, 400.0);
+
+    for (int idx = 0; idx < 20; idx++) {
+        float i = float(idx);
+        float normDepth = fract((i - iTime * forwardSpeed) / 20.0);
+        float zDepth = normDepth * 20.0;
+
+        // Smooth near-camera and far-horizon fade so passing rings never pop or white-out
+        float nearFade = smoothstep(0.18, 1.35, zDepth);
+        float farFade  = smoothstep(20.0, 14.5, zDepth);
+        float depthWindow = nearFade * farFade;
+
+        vec2 p = rayUv * zDepth;
+
+        // Helical twisting and spinning rotation
+        float angle = (zDepth * 0.15 + iTime * 0.8) * twistScale;
+        p = triPortalRot(angle) * p;
+
+        // Equilateral triangle SDF + crisp dual-rail bevel
+        float triRadius = 1.5 + bass * 0.08 * sin(i * 1.57 + iTime * 3.0);
+        float rawD = sdEquilateralTri(p, triRadius);
+        float dWorld = abs(rawD);
+        // Perspective-corrected screen-space distance for razor-sharp anti-aliased laser core at all depths
+        float dScreen = dWorld / max(zDepth, 0.35);
+
+        // Alternating electric neon cyan and hot laser magenta
+        bool isEven = mod(i, 2.0) < 0.5;
+        vec3 ringColor = isEven
+            ? vec3(0.0, 0.94, 1.0)   // Electric Neon Cyan
+            : vec3(1.0, 0.10, 0.86); // Hot Neon Magenta
+
+        // 1. Razor-sharp screen-space white-hot plasma core (never blurs or pixelates)
+        float coreThickness = mix(0.0042, 0.0016, clamp((crispness - 0.5) / 2.0, 0.0, 1.0)) * (1.0 + isReflection * 0.85);
+        float aaWidth = max(pixelScale * 1.35, 0.0009);
+        float whiteCore = smoothstep(coreThickness + aaWidth, max(0.0, coreThickness - aaWidth), dScreen);
+
+        // 2. Tight chromatic neon tube sheath around the white plasma core
+        float tightSheath = 0.0048 / (dScreen * crispness + 0.0038);
+
+        // 3. Controlled outer gas bloom with high-contrast falloff so dark space stays deep
+        float gasBloom = exp(-dWorld * (7.5 * crispness)) * 0.62;
+
+        // Subtle secondary inner filament harmonic echo for extra geometric definition
+        float innerEchoD = abs(abs(rawD + 0.055) - 0.008) / max(zDepth, 0.45);
+        float innerEcho = smoothstep(0.0022, 0.0, innerEchoD) * 0.35 * clamp(crispness - 0.6, 0.0, 1.2);
+
+        float distAtten = 1.0 / (zDepth * 0.36 + 0.32);
+
+        vec3 planeGlow =
+            vec3(1.0, 0.99, 1.0) * (whiteCore * 2.85 + innerEcho) +
+            ringColor * (tightSheath * 0.72 + gasBloom * 1.15 + whiteCore * 1.25);
+
+        stackCol += planeGlow * distAtten * depthWindow * (1.0 + high * 0.22);
+    }
+
+    return stackCol;
+}
+
+vec3 evalNeonTrianglePortal(vec2 coord, float twistScale, float crispness, float floorReflect) {
+    float bass = clamp(uAudioSub * uAudioReactivity, 0.0, 2.0);
+    float mid  = clamp(uAudioMid * uAudioReactivity, 0.0, 2.0);
+    float high = clamp(uAudioHigh * uAudioReactivity, 0.0, 2.0);
+
+    // Subtle mouse parallax
+    vec2 uv = coord - uMouse * 0.18;
+    vec3 ro = vec3(0.0, 0.52, iTime * 3.0);
+    vec3 rd = normalize(vec3(uv, 1.0));
+
+    // Deep high-contrast dark obsidian-indigo atmospheric background
+    vec3 col = vec3(0.008, 0.011, 0.024);
+
+    // Direct 20-plane spinning neon triangle tunnel
+    vec3 directTunnel = traceNeonTriangleStack(uv, twistScale, crispness, bass, high, 0.0);
+    col += directTunnel;
+
+    // Reflective cyber floor below the horizon (rd.y < 0.0) that preserves & mirrors the triangles cleanly
+    if (rd.y < -0.004 && floorReflect > 0.001) {
+        float t = -ro.y / rd.y;
+        vec3 hitPos = ro + rd * t;
+
+        // Rippled wet floor normal distortion for realistic neon reflections
+        float zWave = sin(hitPos.z * 2.2 - iTime * 3.0);
+        float xWave = cos(hitPos.x * 4.5 + hitPos.z * 1.2);
+        vec2 floorRipple = vec2(
+            sin(hitPos.z * 3.5 + hitPos.x * 4.0 - iTime * 3.2) * 0.008,
+            cos(hitPos.z * 5.0 - iTime * 4.0) * 0.006
+        ) / (1.0 + t * 0.12);
+
+        // Mirror ray UV vertically across the floor plane to reflect the actual spinning triangles
+        vec2 reflUv = vec2(uv.x, -uv.y) + floorRipple;
+        vec3 mirroredTriangles = traceNeonTriangleStack(reflUv, twistScale, crispness * 0.85, bass, high, 1.0);
+
+        // Crisp perspective cyber-floor grid & transverse neon ribs
+        float floorRibs = smoothstep(0.65, 0.98, sin(hitPos.z * 1.8 - iTime * 4.5) * 0.5 + 0.5);
+        float zLines = smoothstep(0.92, 0.995, cos(hitPos.x * 3.14159 * 1.5));
+        vec3 floorBase = mix(vec3(0.025, 0.012, 0.055), vec3(0.0, 0.08, 0.18), zWave * 0.5 + 0.5);
+
+        // Central neon light bleed runner along the floor
+        float centerBleed = 0.42 / (abs(hitPos.x) * 1.35 + 0.42);
+        vec3 bleedTint = mix(vec3(0.0, 0.85, 1.0), vec3(1.0, 0.12, 0.85), 0.5 + 0.5 * sin(hitPos.z * 0.6 - iTime * 3.0 + mid));
+        floorBase += bleedTint * centerBleed * (0.14 + 0.18 * floorRibs + 0.12 * zLines);
+
+        // Schlick Fresnel reflectivity: grazing angles near horizon reflect like a dark mirror
+        float fresnel = pow(clamp(1.0 - abs(rd.y) * 1.35, 0.0, 1.0), 2.4);
+        float floorFog = exp(-t * 0.075);
+
+        vec3 floorComposite = floorBase + mirroredTriangles * (0.38 + 0.48 * fresnel) * floorReflect;
+        // Blend floor additive/screen reflection without erasing the foreground bottom vertices of the triangles
+        float fgTriangleMask = clamp(dot(directTunnel, vec3(0.333)) * 0.65, 0.0, 0.92);
+        col = mix(
+            mix(col, floorComposite, floorFog * 0.72 * clamp(floorReflect, 0.0, 1.0)),
+            col + mirroredTriangles * 0.35 * floorFog * floorReflect,
+            fgTriangleMask
+        );
+    }
+
+    // Crisp filmic Reinhard + contrast curve so cores gleam pure white and neon hues stay saturated
+    col = col / (col + vec3(0.88));
+    col = pow(max(col, vec3(0.0)), vec3(0.56));
+    return clamp(col * 1.25, 0.0, 3.0);
+}
+`,
+  glslEvalExpr:
+    'evalNeonTrianglePortal(domainCoord, uTriTwist, uTriCrispness, uTriFloorReflect)',
+  shadertoyHelper: (v) => {
+    const tw = (v.twistRate ?? 1.0).toFixed(2);
+    const cr = (v.crispness ?? 1.45).toFixed(2);
+    const fr = (v.floorReflect ?? 1.1).toFixed(2);
+    return `// Layer 30: Rotating Neon Triangle Portal (Ultra-Crisp Plasma Core & Wet Mirror Floor)
+mat2 triPortalRot(float a) { float s = sin(a), c = cos(a); return mat2(c, -s, s, c); }
+float sdEquilateralTri(vec2 p, float r) {
+    const float k = 1.7320508;
+    p.x = abs(p.x) - r; p.y = p.y + r / k;
+    if (p.x + k * p.y > 0.0) p = vec2(p.x - k * p.y, -k * p.x - p.y) * 0.5;
+    p.x -= clamp(p.x, -2.0 * r, 0.0);
+    return -length(p) * sign(p.y);
+}
+vec3 evalNeonTrianglePortal(vec2 uv) {
+    vec3 ro = vec3(0.0, 0.52, iTime * 3.0), rd = normalize(vec3(uv, 1.0));
+    vec3 col = vec3(0.008, 0.011, 0.024);
+    for (int idx = 0; idx < 20; idx++) {
+        float i = float(idx);
+        float zDepth = fract((i - iTime * 1.5) / 20.0) * 20.0;
+        float depthWin = smoothstep(0.18, 1.35, zDepth) * smoothstep(20.0, 14.5, zDepth);
+        vec2 p = triPortalRot((zDepth * 0.15 + iTime * 0.8) * ${tw}) * (uv * zDepth);
+        float dWorld = abs(sdEquilateralTri(p, 1.5));
+        float dScreen = dWorld / max(zDepth, 0.35);
+        vec3 ringColor = (mod(i, 2.0) < 0.5) ? vec3(0.0, 0.94, 1.0) : vec3(1.0, 0.10, 0.86);
+        float whiteCore = smoothstep(0.0032, 0.0006, dScreen);
+        float tightSheath = 0.0048 / (dScreen * ${cr} + 0.0038);
+        float gasBloom = exp(-dWorld * (7.5 * ${cr})) * 0.62;
+        col += (vec3(1.0) * whiteCore * 2.85 + ringColor * (tightSheath * 0.72 + gasBloom * 1.15 + whiteCore * 1.25)) / (zDepth * 0.36 + 0.32) * depthWin;
+    }
+    if (rd.y < -0.004) {
+        float t = -ro.y / rd.y;
+        vec3 hitPos = ro + rd * t;
+        float centerBleed = 0.42 / (abs(hitPos.x) * 1.35 + 0.42);
+        vec3 floorCol = vec3(0.0, 0.12, 0.24) * centerBleed * (0.5 + 0.5 * sin(hitPos.z * 1.5 - iTime * 3.0)) * ${fr};
+        col += floorCol * exp(-t * 0.075);
+    }
+    col = pow(max(col / (col + vec3(0.88)), vec3(0.0)), vec3(0.56));
+    return clamp(col * 1.25, 0.0, 3.0);
+}`;
+  },
+  shadertoyMain: (mix) =>
+    `    // Layer 30: Rotating Neon Triangle Portal
+    col += evalNeonTrianglePortal(domainCoord) * ${mix.toFixed(2)};`,
+};
+
+/**
+ * Master Modular Shader Layer Registry (Ordered 01 through 30, unmasked full-viewport layers).
  */
 export const SHADER_LAYERS: ShaderLayerDefinition[] = [
   polarTunnelLayer,       // 01. Polar Harmonic Tunnel
@@ -2896,7 +3455,11 @@ export const SHADER_LAYERS: ShaderLayerDefinition[] = [
   klein4dLayer,           // 26. 4D Kleinian Inversion Lattice
   ps2BiosLayer,           // 27. PS2 BIOS Crystal Towers & 7-Orb Nebula
   ps2VlmLayer,            // 28. PS2 VLM Waveform Ribbon & Spectrum Horizon
+  neonCorridorLayer,      // 29. Neon Crystal Ice Corridor
+  neonTriangleLayer,      // 30. Rotating Neon Triangle Portal
 ];
+
+
 
 
 

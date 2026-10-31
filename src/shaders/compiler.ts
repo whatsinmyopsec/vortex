@@ -11,9 +11,7 @@ import {
 } from './types';
 
 const DEFAULT_INITIAL_LAYER_MIXES: Record<string, number> = {
-  klein4d: 0.96,
-  kaleidoscope: 0.88,
-  starfield: 0.78,
+  neontriangle: 1.0,
 };
 
 /**
@@ -43,6 +41,8 @@ export function buildDefaultLayerOrder(
   layers: ShaderLayerDefinition[] = SHADER_LAYERS
 ): string[] {
   const priorityIds = [
+    'neontriangle',
+    'neoncorridor',
     'klein4d',
     'kaleidoscope',
     'starfield',
@@ -84,6 +84,7 @@ export const DEFAULT_SHADER_STATE: ShaderState = {
   trailZoomWarp: 0.009,
   crtScanlines: 0.0,
   ps2ColorMatrix: 0.0,
+  bassZoomPunch: 0.45,
   layerOrder: buildDefaultLayerOrder(SHADER_LAYERS),
   layers: buildDefaultLayersState(SHADER_LAYERS),
 };
@@ -109,6 +110,7 @@ function withLayerOverrides(
     trailZoomWarp?: number;
     crtScanlines?: number;
     ps2ColorMatrix?: number;
+    bassZoomPunch?: number;
     layerOrder?: string[];
     mixes: Record<string, number>;
     subValues?: Record<string, Record<string, number>>;
@@ -155,6 +157,7 @@ function withLayerOverrides(
     trailZoomWarp: overrides.trailZoomWarp ?? 0.009,
     crtScanlines: overrides.crtScanlines ?? 0.0,
     ps2ColorMatrix: overrides.ps2ColorMatrix ?? 0.0,
+    bassZoomPunch: overrides.bassZoomPunch ?? base.bassZoomPunch ?? 0.45,
     layerOrder: finalOrder,
     layers: nextLayers,
   };
@@ -337,10 +340,436 @@ export const SHADER_PRESETS: PresetItem[] = [
         },
       }),
   },
+  {
+    id: 'ps2-neon-triangle-vlm-overdrive',
+    name: 'PS2 Neon Triangle VLM: 84% Trail Overdrive',
+    subtitle:
+      '#1 Layer 30 (Rotating Neon Triangle Portal) fused with #2 Layer 28 (PS2 VLM Waveform Ribbons & Radial EQ) and #3 Layer 27 (7 Orbiting PS2 Orbs) with 84% liquid motion trails and Trinitron CRT scanlines',
+    badge: 'PS2 VLM · Neon Triangles + 84% Trails',
+    category: 'ps2-visualizer',
+    mechanics: [
+      '84% Motion Trails',
+      'Layer 30 Neon Triangles',
+      'PS2 VLM Oscilloscope',
+      'Trinitron Scanlines 30%',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.15,
+        swirlTwist: 0.9,
+        polarDepth: 0.3,
+        flowSpeed: 0.55,
+        angularSpeed: 0.08,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.88,
+        negativeSpaceThreshold: 0.22,
+        trailPersistence: 0.84,
+        trailZoomWarp: 0.01,
+        crtScanlines: 0.3,
+        ps2ColorMatrix: 0.35,
+        layerOrder: ['neontriangle', 'ps2vlm', 'ps2bios', 'starfield'],
+        mixes: {
+          neontriangle: 0.96,
+          ps2vlm: 0.88,
+          ps2bios: 0.72,
+          starfield: 0.6,
+        },
+        subValues: {
+          neontriangle: {
+            twistRate: 1.15,
+            crispness: 1.65,
+            floorReflect: 1.15,
+          },
+          ps2vlm: { waveAmp: 1.4, bandCount: 28.0, ribbonGlow: 1.5 },
+          ps2bios: { density: 5.5, orbGlow: 1.6, fogDepth: 1.1 },
+        },
+      }),
+  },
+  {
+    id: 'ps2-crystal-corridor-bios-sanctuary',
+    name: 'PS2 BIOS Ice Cathedral: Corridor → Towers & 7 Orbs',
+    subtitle:
+      '#1 Layer 29 (3D Neon Crystal Ice Corridor) opening into #2 Layer 27 (PS2 BIOS Monolithic Towers & 7 Orbiting Orbs) and #3 Layer 28 (VLM Spectrum) with 76% temporal trail smear',
+    badge: 'PS2 BIOS · 3D Ice Corridor + 7 Orbs',
+    category: 'ps2-visualizer',
+    mechanics: [
+      'Layer 29 Ice Corridor',
+      'PS2 7-Orb Constellation',
+      '76% Temporal Smear',
+      'Cobalt-Amethyst Grade',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.1,
+        swirlTwist: 0.85,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.86,
+        negativeSpaceThreshold: 0.22,
+        trailPersistence: 0.76,
+        trailZoomWarp: 0.008,
+        crtScanlines: 0.24,
+        ps2ColorMatrix: 0.45,
+        layerOrder: ['neoncorridor', 'ps2bios', 'ps2vlm', 'starfield'],
+        mixes: {
+          neoncorridor: 0.94,
+          ps2bios: 0.9,
+          ps2vlm: 0.74,
+          starfield: 0.65,
+        },
+        subValues: {
+          neoncorridor: {
+            portalSpacing: 1.8,
+            rockRelief: 1.2,
+            neonBloom: 1.4,
+          },
+          ps2bios: { density: 5.5, orbGlow: 1.75, fogDepth: 1.25 },
+          ps2vlm: { waveAmp: 1.25, bandCount: 24.0, ribbonGlow: 1.35 },
+        },
+      }),
+  },
 
   // ============================================================================
   // NEW LAYERS & NEGATIVE-SPACE CASCADES
   // ============================================================================
+  {
+    id: 'rotating-neon-triangle-portal-30',
+    name: '30. Rotating Neon Triangle Portal (Ultra-Crisp Plasma & Floor)',
+    subtitle:
+      '20-plane twisting neon cyan & hot-magenta equilateral triangle SDF portal with screen-space anti-aliased white-hot plasma cores, controlled gas bloom, and wet mirror floor reflections',
+    badge: 'Layer 30 · Crisp Neon Triangles',
+    category: 'new-layers',
+    mechanics: [
+      'Screen-Space Laser Core',
+      '20-Plane Helix Twist',
+      'Wet Mirror Floor',
+      'Cyan & Hot Magenta',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.0,
+        swirlTwist: 0.65,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.92,
+        negativeSpaceThreshold: 0.22,
+        layerOrder: ['neontriangle', 'starfield'],
+        mixes: {
+          neontriangle: 1.0,
+        },
+        subValues: {
+          neontriangle: {
+            twistRate: 1.0,
+            crispness: 1.45,
+            floorReflect: 1.1,
+          },
+        },
+      }),
+  },
+  {
+    id: 'neon-triangle-crystal-corridor-30-29',
+    name: '30. Rotating Neon Triangles → 29. Neon Crystal Ice Corridor',
+    subtitle:
+      '#1 Layer 30 (Rotating Neon Triangle Portal) carved over #2 Layer 29 (3D Neon Crystal Ice Corridor) so the crystalline amethyst cave walls glow inside the spinning triangle portal',
+    badge: 'Layers 30 → 29 Hybrid Portal',
+    category: 'new-layers',
+    mechanics: [
+      'Layer 30 Neon Triangles',
+      'Layer 29 Ice Corridor',
+      'Neg-Space 92%',
+      'Optical Glow',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.05,
+        swirlTwist: 0.75,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.92,
+        negativeSpaceThreshold: 0.24,
+        layerOrder: ['neontriangle', 'neoncorridor', 'starfield'],
+        mixes: {
+          neontriangle: 0.96,
+          neoncorridor: 0.88,
+          starfield: 0.55,
+        },
+        subValues: {
+          neontriangle: {
+            twistRate: 1.05,
+            crispness: 1.6,
+            floorReflect: 0.95,
+          },
+          neoncorridor: {
+            portalSpacing: 1.85,
+            rockRelief: 1.15,
+            neonBloom: 1.35,
+          },
+        },
+      }),
+  },
+  {
+    id: 'triangle-klein4d-mandala-prism-30-26-10',
+    name: '30. Neon Triangles → 26. 4D Kleinian → 10. Sacred Mandala',
+    subtitle:
+      '#1 Razor-sharp Rotating Neon Triangle Portal framing #2 80-Step 4D Kleinian Inversion Lattice and #3 12-Fold Kaleidoscopic Mandala in the negative-space core',
+    badge: 'Layers 30 → 26 → 10 Prism',
+    category: 'new-layers',
+    mechanics: [
+      'Layer 30 Laser Triangles',
+      'Layer 26 4D Kleinian',
+      'Layer 10 12-Fold Mandala',
+      'Neg-Space 95%',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.12,
+        swirlTwist: 0.85,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.95,
+        negativeSpaceThreshold: 0.25,
+        layerOrder: ['neontriangle', 'klein4d', 'kaleidoscope', 'starfield'],
+        mixes: {
+          neontriangle: 0.96,
+          klein4d: 0.9,
+          kaleidoscope: 0.82,
+          starfield: 0.6,
+        },
+        subValues: {
+          neontriangle: {
+            twistRate: 1.2,
+            crispness: 1.85,
+            floorReflect: 0.85,
+          },
+          klein4d: { invScale: 10.2, speed: 0.28 },
+          kaleidoscope: { folds: 12.0, zoom: 1.45, morph: 1.05 },
+        },
+      }),
+  },
+  {
+    id: 'inverted-corridor-over-triangles-29-30-05',
+    name: 'Order Inversion: 29. Ice Corridor → 30. Neon Triangles → 05. Accretion',
+    subtitle:
+      'Flips priority so #1 3D Neon Crystal Ice Corridor sculpts the outer cave while #2 Rotating Neon Triangles and #3 Event Horizon Accretion blaze inside the dark rock shadows',
+    badge: '#1 Ice Corridor → #2 Triangles → #3 Accretion',
+    category: 'order-inversions',
+    mechanics: [
+      'Priority Flip 29 → 30',
+      'Neg-Space 94%',
+      'Gate 0.28',
+      'Event Horizon Core',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.15,
+        swirlTwist: 0.9,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.94,
+        negativeSpaceThreshold: 0.28,
+        layerOrder: ['neoncorridor', 'neontriangle', 'accretion', 'starfield'],
+        mixes: {
+          neoncorridor: 0.94,
+          neontriangle: 0.92,
+          accretion: 0.84,
+          starfield: 0.6,
+        },
+        subValues: {
+          neoncorridor: {
+            portalSpacing: 1.75,
+            rockRelief: 1.35,
+            neonBloom: 1.2,
+          },
+          neontriangle: {
+            twistRate: 1.35,
+            crispness: 1.7,
+            floorReflect: 0.9,
+          },
+          accretion: { radius: 0.18, spin: 1.35 },
+        },
+      }),
+  },
+  {
+    id: 'polar-wrapped-neon-triangles-corridor',
+    name: 'Polar-Wrapped Stargate: 30. Neon Triangles → 29. Ice Corridor → 06. Truchet',
+    subtitle:
+      'Projects #1 Rotating Neon Triangles and #2 Neon Crystal Ice Corridor into 3D Polar Tunnel space (uCoordSpace = 1) with Bipolar Field warp and #3 Smith Truchet conduits',
+    badge: 'Polar Space · Triangles → Corridor → Truchet',
+    category: 'polar-wrapped',
+    mechanics: [
+      '3D Polar Coordinate Warp',
+      'Bipolar Field Lens',
+      'Layers 30 → 29 → 06',
+      'Tunnel Fusion',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 1,
+        distortionStrength: 1.28,
+        swirlTwist: 1.1,
+        polarDepth: 0.34,
+        flowSpeed: 0.65,
+        angularSpeed: 0.1,
+        layerBlendStyle: 0,
+        layerCoordSpace: 1,
+        negativeSpaceFill: 0.93,
+        negativeSpaceThreshold: 0.24,
+        layerOrder: ['neontriangle', 'neoncorridor', 'truchet', 'tunnel'],
+        mixes: {
+          neontriangle: 0.94,
+          neoncorridor: 0.88,
+          truchet: 0.8,
+          tunnel: 0.68,
+        },
+        subValues: {
+          neontriangle: {
+            twistRate: 1.15,
+            crispness: 1.65,
+            floorReflect: 0.8,
+          },
+          neoncorridor: {
+            portalSpacing: 2.0,
+            rockRelief: 1.2,
+            neonBloom: 1.35,
+          },
+          truchet: { scale: 7.5, pulse: 1.45 },
+          tunnel: { freq: 12.0, tone: 0.88, contrast: 2.5 },
+        },
+      }),
+  },
+  {
+    id: 'sub-bass-triangle-corridor-mandelbrot-rig',
+    name: 'Audio Bass Portal: 30. Neon Triangles → 29. Ice Corridor → 21. Mandelbrot → 20. Cherenkov',
+    subtitle:
+      'High-impact audio-reactive rig where sub-bass drives #1 Rotating Neon Triangles, #2 3D Crystal Ice Corridor, #3 Seahorse Mandelbrot Zoom, and #4 Cherenkov Hex Shockwaves',
+    badge: 'Audio Rig · 30 → 29 → 21 → 20',
+    category: 'audio-reactive',
+    mechanics: [
+      'Sub-Bass Portal Surge',
+      'Gravity Ripple Mode',
+      '160% Mandelbrot Pull',
+      'Cherenkov Hex Pulse',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 2,
+        distortionStrength: 1.25,
+        swirlTwist: 1.05,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.94,
+        negativeSpaceThreshold: 0.25,
+        layerOrder: [
+          'neontriangle',
+          'neoncorridor',
+          'mandelbrot',
+          'cherenkov',
+          'starfield',
+        ],
+        mixes: {
+          neontriangle: 0.95,
+          neoncorridor: 0.86,
+          mandelbrot: 0.84,
+          cherenkov: 0.78,
+          starfield: 0.55,
+        },
+        subValues: {
+          neontriangle: {
+            twistRate: 1.25,
+            crispness: 1.75,
+            floorReflect: 1.15,
+          },
+          neoncorridor: {
+            portalSpacing: 1.9,
+            rockRelief: 1.2,
+            neonBloom: 1.45,
+          },
+          mandelbrot: { baseZoom: 0.44, audioPull: 1.6 },
+          cherenkov: { hexScale: 10.0, pulseSpeed: 1.65 },
+        },
+      }),
+  },
+  {
+    id: 'neon-crystal-ice-corridor-29',
+    name: '29. Neon Crystal Ice Corridor (3D Portal Cave)',
+    subtitle:
+      '3D raymarched rounded-square amethyst & lavender crystalline ice-cave tunnel lined with glowing violet, warm-gold, and cyan neon portal arches and a misty cyan-white horizon',
+    badge: 'Layer 29 · 3D Neon Ice Cave',
+    category: 'new-layers',
+    mechanics: [
+      '48-Step 3D Raymarch',
+      'Rounded-Square Portals',
+      'Wet Crystal Normals',
+      'Misty Horizon Bloom',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.0,
+        swirlTwist: 0.65,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.92,
+        negativeSpaceThreshold: 0.22,
+        layerOrder: ['neoncorridor', 'starfield'],
+        mixes: {
+          neoncorridor: 1.0,
+        },
+        subValues: {
+          neoncorridor: {
+            portalSpacing: 1.85,
+            rockRelief: 1.15,
+            neonBloom: 1.35,
+          },
+        },
+      }),
+  },
+  {
+    id: 'neon-corridor-kifs-starfield-29-24-03',
+    name: '29. Neon Crystal Corridor → 24. KIFS Crystal → 03. Starfield',
+    subtitle:
+      '#1 Layer 29 (Neon Crystal Ice Corridor) cascading into #2 Layer 24 (3D KIFS Crystal) and #3 Layer 03 (Orbital Starfield) inside deep amethyst rock shadows',
+    badge: 'Layers 29 → 24 → 03 Cascade',
+    category: 'new-layers',
+    mechanics: [
+      'Layer 29 Neon Corridor',
+      'Layer 24 KIFS Crystal',
+      'Layer 03 Starfield',
+      'Neg-Space 92%',
+    ],
+    apply: (base) =>
+      withLayerOverrides(base, {
+        distortionMode: 0,
+        distortionStrength: 1.1,
+        swirlTwist: 0.85,
+        layerBlendStyle: 1,
+        layerCoordSpace: 0,
+        negativeSpaceFill: 0.92,
+        negativeSpaceThreshold: 0.24,
+        layerOrder: ['neoncorridor', 'kifscrystal', 'starfield'],
+        mixes: {
+          neoncorridor: 0.96,
+          kifscrystal: 0.72,
+          starfield: 0.65,
+        },
+        subValues: {
+          neoncorridor: {
+            portalSpacing: 1.95,
+            rockRelief: 1.25,
+            neonBloom: 1.4,
+          },
+          kifscrystal: { camDist: 3.3, scale: 2.0 },
+          starfield: { speed: 1.0, size: 0.05 },
+        },
+      }),
+  },
   {
     id: 'ferrofluid-penrose-starfield-accretion-11-14-03-05',
     name: '11. Ferrofluid → 14. Penrose → 03. Starfield → 05. Accretion',
@@ -1450,12 +1879,12 @@ export const SHADER_PRESETS: PresetItem[] = [
   },
   {
     id: 'omni-twenty-five-layer-symphony',
-    name: '28-Layer Negative-Space Superposition',
+    name: '30-Layer Negative-Space Superposition',
     subtitle:
-      'Sequential negative-space cascade across all 28 modular shader layers in priority order',
-    badge: 'All 28 Layers',
+      'Sequential negative-space cascade across all 30 modular shader layers in priority order',
+    badge: 'All 30 Layers',
     category: 'new-layers',
-    mechanics: ['All 28 Layers Active', 'Neg-Space 88%', 'Gate 0.26', 'Gravity Ripple'],
+    mechanics: ['All 30 Layers Active', 'Neg-Space 88%', 'Gate 0.26', 'Gravity Ripple'],
     apply: (base) =>
       withLayerOverrides(base, {
         distortionMode: 2,
@@ -1465,6 +1894,8 @@ export const SHADER_PRESETS: PresetItem[] = [
         negativeSpaceFill: 0.88,
         negativeSpaceThreshold: 0.26,
         mixes: {
+          neontriangle: 0.85,
+          neoncorridor: 0.82,
           ps2bios: 0.72,
           ps2vlm: 0.68,
           klein4d: 0.78,
@@ -1587,6 +2018,7 @@ uniform float uAudioSub;
 uniform float uAudioMid;
 uniform float uAudioHigh;
 uniform float uAudioReactivity;
+uniform float uBassZoom;
 
 // Dynamically Registered Layer Uniforms
 ${uniformLines.join('\n')}
