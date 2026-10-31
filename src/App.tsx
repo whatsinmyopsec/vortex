@@ -878,159 +878,161 @@ export default function App() {
       </div>
 
       {/* Top Bar Contract: 3 zones separated by gap-8 */}
-      <header className="relative z-20 flex items-center justify-between gap-8 px-6 py-3.5 bg-black/45 backdrop-blur-md border-b border-white/10">
-        {/* Zone 1: Single text element wordmark */}
-        <a
-          href="#top"
-          onClick={(e) => {
-            e.preventDefault();
-            setHudVisible(true);
-          }}
-          className="font-display text-lg font-bold tracking-tight text-white whitespace-nowrap shrink-0"
-        >
-          Vortex
-        </a>
+      {hudVisible && (
+        <header className="relative z-20 flex items-center justify-between gap-8 px-6 py-3.5 bg-black/45 backdrop-blur-md border-b border-white/10">
+          {/* Zone 1: Single text element wordmark */}
+          <a
+            href="#top"
+            onClick={(e) => {
+              e.preventDefault();
+              setHudVisible(true);
+            }}
+            className="font-display text-lg font-bold tracking-tight text-white whitespace-nowrap shrink-0"
+          >
+            Vortex
+          </a>
 
-        {/* Zone 2: 4 concise single-line navigation links */}
-        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-neutral-300">
-          <button
-            type="button"
-            onClick={() => handleNavClick('layers')}
-            className={`hover:text-white transition-colors whitespace-nowrap shrink-0 pb-0.5 border-b-2 cursor-pointer ${
-              hudVisible && activeTab === 'layers'
-                ? 'text-white border-amber-500'
-                : 'border-transparent'
-            }`}
-          >
-            Shader Layers
-          </button>
-          <button
-            type="button"
-            onClick={() => handleNavClick('distortion')}
-            className={`hover:text-white transition-colors whitespace-nowrap shrink-0 pb-0.5 border-b-2 cursor-pointer ${
-              hudVisible && activeTab === 'distortion'
-                ? 'text-white border-amber-500'
-                : 'border-transparent'
-            }`}
-          >
-            Mouse Warp
-          </button>
-          <button
-            type="button"
-            onClick={() => handleNavClick('presets')}
-            className={`hover:text-white transition-colors whitespace-nowrap shrink-0 pb-0.5 border-b-2 cursor-pointer ${
-              hudVisible && activeTab === 'presets'
-                ? 'text-white border-amber-500'
-                : 'border-transparent'
-            }`}
-          >
-            Presets
-          </button>
-          <button
-            type="button"
-            onClick={() => handleNavClick('glsl')}
-            className={`hover:text-white transition-colors whitespace-nowrap shrink-0 pb-0.5 border-b-2 cursor-pointer ${
-              hudVisible && activeTab === 'glsl'
-                ? 'text-white border-amber-500'
-                : 'border-transparent'
-            }`}
-          >
-            GLSL Code
-          </button>
-        </nav>
+          {/* Zone 2: 4 concise single-line navigation links */}
+          <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-neutral-300">
+            <button
+              type="button"
+              onClick={() => handleNavClick('layers')}
+              className={`hover:text-white transition-colors whitespace-nowrap shrink-0 pb-0.5 border-b-2 cursor-pointer ${
+                hudVisible && activeTab === 'layers'
+                  ? 'text-white border-amber-500'
+                  : 'border-transparent'
+              }`}
+            >
+              Shader Layers
+            </button>
+            <button
+              type="button"
+              onClick={() => handleNavClick('distortion')}
+              className={`hover:text-white transition-colors whitespace-nowrap shrink-0 pb-0.5 border-b-2 cursor-pointer ${
+                hudVisible && activeTab === 'distortion'
+                  ? 'text-white border-amber-500'
+                  : 'border-transparent'
+              }`}
+            >
+              Mouse Warp
+            </button>
+            <button
+              type="button"
+              onClick={() => handleNavClick('presets')}
+              className={`hover:text-white transition-colors whitespace-nowrap shrink-0 pb-0.5 border-b-2 cursor-pointer ${
+                hudVisible && activeTab === 'presets'
+                  ? 'text-white border-amber-500'
+                  : 'border-transparent'
+              }`}
+            >
+              Presets
+            </button>
+            <button
+              type="button"
+              onClick={() => handleNavClick('glsl')}
+              className={`hover:text-white transition-colors whitespace-nowrap shrink-0 pb-0.5 border-b-2 cursor-pointer ${
+                hudVisible && activeTab === 'glsl'
+                  ? 'text-white border-amber-500'
+                  : 'border-transparent'
+              }`}
+            >
+              GLSL Code
+            </button>
+          </nav>
 
-        {/* Zone 3: Export Actions (15s GIF, 15s Video, Export PNG) */}
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={handleExport15sGif}
-            disabled={
-              captureMode === 'recording-video' ||
-              captureMode === 'encoding-video' ||
-              captureMode === 'encoding-gif'
-            }
-            title={
-              captureMode === 'recording-gif'
-                ? 'Click to stop early and save GIF'
-                : 'Record a 15-second looping animated GIF of the shader'
-            }
-            className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              captureMode === 'recording-gif'
-                ? 'bg-rose-500/25 border-rose-400/60 text-rose-200 hover:bg-rose-500/35'
-                : captureMode === 'encoding-gif'
-                  ? 'bg-amber-500/20 border-amber-400/40 text-amber-200 cursor-wait'
-                  : 'bg-white/10 border-white/15 text-white hover:bg-white/15 disabled:opacity-40 disabled:cursor-not-allowed'
-            }`}
-          >
-            {captureMode === 'recording-gif' ? (
-              <>
-                <Square className="w-3 h-3 fill-rose-400 text-rose-400 animate-pulse" />
-                <span>Stop GIF ({captureSecondsLeft}s)</span>
-              </>
-            ) : captureMode === 'encoding-gif' ? (
-              <>
-                <Film className="w-3.5 h-3.5 text-amber-400 animate-spin" />
-                <span>Encoding {gifEncodeProgress}%</span>
-              </>
-            ) : (
-              <>
-                <Film className="w-3.5 h-3.5 text-amber-400" />
-                <span>15s GIF</span>
-              </>
-            )}
-          </button>
+          {/* Zone 3: Export Actions (15s GIF, 15s Video, Export PNG) */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleExport15sGif}
+              disabled={
+                captureMode === 'recording-video' ||
+                captureMode === 'encoding-video' ||
+                captureMode === 'encoding-gif'
+              }
+              title={
+                captureMode === 'recording-gif'
+                  ? 'Click to stop early and save GIF'
+                  : 'Record a 15-second looping animated GIF of the shader'
+              }
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                captureMode === 'recording-gif'
+                  ? 'bg-rose-500/25 border-rose-400/60 text-rose-200 hover:bg-rose-500/35'
+                  : captureMode === 'encoding-gif'
+                    ? 'bg-amber-500/20 border-amber-400/40 text-amber-200 cursor-wait'
+                    : 'bg-white/10 border-white/15 text-white hover:bg-white/15 disabled:opacity-40 disabled:cursor-not-allowed'
+              }`}
+            >
+              {captureMode === 'recording-gif' ? (
+                <>
+                  <Square className="w-3 h-3 fill-rose-400 text-rose-400 animate-pulse" />
+                  <span>Stop GIF ({captureSecondsLeft}s)</span>
+                </>
+              ) : captureMode === 'encoding-gif' ? (
+                <>
+                  <Film className="w-3.5 h-3.5 text-amber-400 animate-spin" />
+                  <span>Encoding {gifEncodeProgress}%</span>
+                </>
+              ) : (
+                <>
+                  <Film className="w-3.5 h-3.5 text-amber-400" />
+                  <span>15s GIF</span>
+                </>
+              )}
+            </button>
 
-          <button
-            type="button"
-            onClick={() => void handleExport15sVideo()}
-            disabled={
-              captureMode === 'recording-gif' ||
-              captureMode === 'encoding-gif' ||
-              captureMode === 'encoding-video'
-            }
-            title={
-              captureMode === 'recording-video'
-                ? 'Click to stop early and save video'
-                : `Record a 15-second 60 FPS ${preferredVideoFormat.label} video with stereo audio`
-            }
-            className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              captureMode === 'recording-video'
-                ? 'bg-rose-500/25 border-rose-400/60 text-rose-200 hover:bg-rose-500/35'
-                : captureMode === 'encoding-video'
-                  ? 'bg-amber-500/20 border-amber-400/40 text-amber-200 cursor-wait'
-                  : 'bg-white/10 border-white/15 text-white hover:bg-white/15 disabled:opacity-40 disabled:cursor-not-allowed'
-            }`}
-          >
-            {captureMode === 'recording-video' ? (
-              <>
-                <Square className="w-3 h-3 fill-rose-400 text-rose-400 animate-pulse" />
-                <span>
-                  Stop {preferredVideoFormat.label} ({captureSecondsLeft}s)
-                </span>
-              </>
-            ) : captureMode === 'encoding-video' ? (
-              <>
-                <Video className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                <span>Muxing Audio...</span>
-              </>
-            ) : (
-              <>
-                <Video className="w-3.5 h-3.5 text-amber-400" />
-                <span>15s {preferredVideoFormat.label}</span>
-              </>
-            )}
-          </button>
+            <button
+              type="button"
+              onClick={() => void handleExport15sVideo()}
+              disabled={
+                captureMode === 'recording-gif' ||
+                captureMode === 'encoding-gif' ||
+                captureMode === 'encoding-video'
+              }
+              title={
+                captureMode === 'recording-video'
+                  ? 'Click to stop early and save video'
+                  : `Record a 15-second 60 FPS ${preferredVideoFormat.label} video with stereo audio`
+              }
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                captureMode === 'recording-video'
+                  ? 'bg-rose-500/25 border-rose-400/60 text-rose-200 hover:bg-rose-500/35'
+                  : captureMode === 'encoding-video'
+                    ? 'bg-amber-500/20 border-amber-400/40 text-amber-200 cursor-wait'
+                    : 'bg-white/10 border-white/15 text-white hover:bg-white/15 disabled:opacity-40 disabled:cursor-not-allowed'
+              }`}
+            >
+              {captureMode === 'recording-video' ? (
+                <>
+                  <Square className="w-3 h-3 fill-rose-400 text-rose-400 animate-pulse" />
+                  <span>
+                    Stop {preferredVideoFormat.label} ({captureSecondsLeft}s)
+                  </span>
+                </>
+              ) : captureMode === 'encoding-video' ? (
+                <>
+                  <Video className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                  <span>Muxing Audio...</span>
+                </>
+              ) : (
+                <>
+                  <Video className="w-3.5 h-3.5 text-amber-400" />
+                  <span>15s {preferredVideoFormat.label}</span>
+                </>
+              )}
+            </button>
 
-          <button
-            type="button"
-            onClick={handleExportPng}
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-neutral-950 bg-amber-400 rounded-lg hover:bg-amber-300 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5" />
-            Export PNG
-          </button>
-        </div>
-      </header>
+            <button
+              type="button"
+              onClick={handleExportPng}
+              className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-neutral-950 bg-amber-400 rounded-lg hover:bg-amber-300 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Export PNG
+            </button>
+          </div>
+        </header>
+      )}
 
       {/* Left Floating Panel: Live Procedural Web Audio Synthesizer (stays mounted when hidden so music never stops) */}
       <AudioSynthPanel

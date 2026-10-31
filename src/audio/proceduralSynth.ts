@@ -69,6 +69,13 @@ export function estimateSeedBpmFromTrack(
   if (combined.includes('35tZN3FK6QJCpt0S'.toLowerCase())) {
     return 132;
   }
+  if (
+    combined.includes('6ITmtiP9NU83f2Kj'.toLowerCase()) ||
+    combined.includes('7f05f29e-bf18-4c7f-9ed9-0094afa656b6') ||
+    combined.includes('melodic female')
+  ) {
+    return 122;
+  }
   return fallbackBpm;
 }
 
@@ -139,6 +146,18 @@ export const PRESET_SONG_LINKS: PresetSongLink[] = [
     url: 'https://suno.com/s/35tZN3FK6QJCpt0S',
   },
   {
+    id: 'suno-melodic-echoing',
+    label: 'Melodic Echoing (6ITmtiP9NU83f2Kj)',
+    subtitle: '(melodic female, echoing) · Suno AI',
+    url: 'https://suno.com/s/6ITmtiP9NU83f2Kj',
+  },
+  {
+    id: 'suno-i-decide',
+    label: 'I decide (FX8XlSwbFVdWUJ76)',
+    subtitle: 'I decide · Suno AI',
+    url: 'https://suno.com/s/FX8XlSwbFVdWUJ76',
+  },
+  {
     id: 'somafm-defcon',
     label: 'DEF CON Radio (Live Stream)',
     subtitle: 'Dark Electro · Glitch · Hacker Beats',
@@ -184,6 +203,14 @@ const KNOWN_SUNO_SHORTLINKS: Record<string, { uuid: string; title: string }> = {
   '35tZN3FK6QJCpt0S': {
     uuid: '8492f898-13a7-4c67-a33d-684790e3aef3',
     title: 'Bro what the ohio rizzler mew gyatt fanu · Suno',
+  },
+  '6ITmtiP9NU83f2Kj': {
+    uuid: '7f05f29e-bf18-4c7f-9ed9-0094afa656b6',
+    title: '(melodic female, echoing) · Suno',
+  },
+  FX8XlSwbFVdWUJ76: {
+    uuid: 'a0e5e8f7-2b1e-41f3-9268-62286968d42c',
+    title: 'I decide · Suno',
   },
 };
 
@@ -300,6 +327,29 @@ function wrapWithAudioProxy(streamUrl: string): string {
 }
 
 /**
+ * Extracts a clean single URL if the user accidentally pasted a second URL
+ * directly onto the end of an existing URL in the input box (e.g.
+ * "https://ice1.somafm.com/synphaera-128-mp3https://suno.com/s/6ITmtiP9NU83f2Kj").
+ */
+export function extractCleanSongUrl(rawInput: string): string {
+  const trimmed = rawInput.trim();
+  if (!trimmed) return '';
+  if (!trimmed.includes('/api/proxy-audio')) {
+    const parts = trimmed
+      .split(/(?=https?:\/\/)/i)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parts.length > 1) {
+      const lastPart = parts[parts.length - 1];
+      if (/^https?:\/\//i.test(lastPart)) {
+        return lastPart.split(/\s+/)[0];
+      }
+    }
+  }
+  return trimmed;
+}
+
+/**
  * Normalizes common song sharing links (Suno shortlinks, Suno song pages, SomaFM station pages,
  * Dropbox, GitHub, Google Drive, direct audio URLs) into streamable audio URLs and extracts a clean display title.
  */
@@ -309,9 +359,10 @@ export function resolveSongUrl(rawInput: string): {
   needsServerResolve?: boolean;
   unsupportedHint?: string;
 } {
-  const trimmed = rawInput
-    .trim()
-    .replace(/^https?:\/\/(?=\.?\/|assets\/)/i, '');
+  const trimmed = extractCleanSongUrl(rawInput).replace(
+    /^https?:\/\/(?=\.?\/|assets\/)/i,
+    ''
+  );
   if (!trimmed) {
     return { url: '', title: 'No song link entered' };
   }
@@ -475,25 +526,36 @@ export async function resolveSongUrlAsync(rawInput: string): Promise<{
   title: string;
   unsupportedHint?: string;
 }> {
-  const syncResult = resolveSongUrl(rawInput);
-  if (!rawInput.trim() || syncResult.unsupportedHint) {
+  const cleaned = extractCleanSongUrl(rawInput);
+  const syncResult = resolveSongUrl(cleaned);
+  if (!cleaned || syncResult.unsupportedHint) {
     return syncResult;
   }
 
-  const trimmed = rawInput.trim();
   if (
-    (trimmed.startsWith('/') && !trimmed.startsWith('//')) ||
-    trimmed.startsWith('./') ||
-    trimmed.includes('assets/aistudio/') ||
-    trimmed.includes('somafm.com')
+    (cleaned.startsWith('/') && !cleaned.startsWith('//')) ||
+    cleaned.startsWith('./') ||
+    cleaned.includes('assets/aistudio/') ||
+    cleaned.includes('somafm.com')
   ) {
     return syncResult;
   }
 
-  if (!isStaticHostWithoutWorker()) {
+  const isSunoLink = /(?:suno\.com|suno\.ai)\//i.test(cleaned);
+  const sunoUuidOrAudioRegex =
+    /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})|\.(?:mp4|m4a|mp3|ogg|wav)(?:\?|$)/i;
+
+  // Try primary API base (local server in AI Studio / dev, or Cloudflare Worker on static host)
+  const candidateApiBases = isStaticHostWithoutWorker()
+    ? [DEFAULT_STATIC_WORKER_URL]
+    : AUDIO_API_BASE
+    ? [AUDIO_API_BASE]
+    : ['', DEFAULT_STATIC_WORKER_URL];
+
+  for (const apiBase of candidateApiBases) {
     try {
       const response = await fetch(
-        `${AUDIO_API_BASE}/api/resolve-song?url=${encodeURIComponent(trimmed)}`
+        `${apiBase}/api/resolve-song?url=${encodeURIComponent(cleaned)}`
       );
       if (response.ok) {
         const data = (await response.json()) as {
@@ -502,12 +564,19 @@ export async function resolveSongUrlAsync(rawInput: string): Promise<{
           streamUrl?: string;
           title?: string;
         };
-        if (data.ok && (data.proxiedUrl || data.streamUrl)) {
+        const candidateStream = data.streamUrl || data.proxiedUrl || '';
+        // Ensure that if the input was a Suno shortlink, the resolver actually extracted a UUID or audio stream
+        // rather than echoing back the raw HTML shortlink when Cloudflare challenges Worker IPs
+        const isValidResolution =
+          Boolean(data.ok && candidateStream) &&
+          (!isSunoLink || sunoUuidOrAudioRegex.test(candidateStream));
+
+        if (isValidResolution) {
           const resolvedProxyUrl = data.proxiedUrl
-            ? data.proxiedUrl.startsWith('/') && AUDIO_API_BASE
-              ? `${AUDIO_API_BASE}${data.proxiedUrl}`
+            ? data.proxiedUrl.startsWith('/') && apiBase
+              ? `${apiBase}${data.proxiedUrl}`
               : data.proxiedUrl
-            : wrapWithAudioProxy(data.streamUrl || trimmed);
+            : wrapWithAudioProxy(data.streamUrl || cleaned);
           return {
             url: resolvedProxyUrl,
             title: data.title || syncResult.title,
@@ -515,15 +584,15 @@ export async function resolveSongUrlAsync(rawInput: string): Promise<{
         }
       }
     } catch {
-      // Fall back to client-side resolution if server/worker endpoint is unreachable
+      // Try next candidate or client-side fallback below
     }
   }
 
-  // Client-side fallback for Suno shortlinks when hosted on static GitHub Pages without a Worker yet
-  if (/(?:suno\.com|suno\.ai)\//i.test(trimmed)) {
+  // Client-side OpenGraph / Microlink resolution for Suno shortlinks (bypasses Cloudflare Worker-to-Suno blocks)
+  if (isSunoLink) {
     try {
       const mlRes = await fetch(
-        `https://api.microlink.io/?url=${encodeURIComponent(trimmed)}`
+        `https://api.microlink.io/?url=${encodeURIComponent(cleaned)}`
       );
       if (mlRes.ok) {
         const mlJson = (await mlRes.json()) as {
@@ -536,17 +605,21 @@ export async function resolveSongUrlAsync(rawInput: string): Promise<{
         };
         const resolvedPageUrl = mlJson.data?.url || '';
         const resolvedImageUrl = mlJson.data?.image?.url || '';
+        const serializedData = JSON.stringify(mlJson.data || {});
         const uuidMatch =
           resolvedPageUrl.match(
             /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/
           ) ||
           resolvedImageUrl.match(
             /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/
+          ) ||
+          serializedData.match(
+            /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/
           );
         if (uuidMatch) {
-          const uuid = uuidMatch[1];
+          const uuid = uuidMatch[1].toLowerCase();
           const cleanTitle = mlJson.data?.title
-            ? `${mlJson.data.title} · Suno`
+            ? `${mlJson.data.title.replace(/\s*\|\s*Suno\s*$/i, '').trim()} · Suno`
             : syncResult.title;
           return {
             url: wrapWithAudioProxy(`https://cdn1.suno.ai/${uuid}.mp4`),
@@ -1752,17 +1825,18 @@ export class ProceduralAudioEngine {
       }
 
       const unwrappedUrl = unwrapDirectFallbackUrl(this.currentRefTrackUrl);
-      // Step 1c: If refAudioEl was using a proxy URL, retry the unwrapped CDN URL (e.g. cdn1.suno.ai) directly on refAudioEl
-      // so Web Audio AnalyserNode FFT and MediaStream video recording remain active
+      // Step 1c: If refAudioEl was using a local /api/proxy-audio URL that failed, retry via the CORS-enabled
+      // Cloudflare Worker proxy on refAudioEl so Web Audio AnalyserNode FFT remains active
+      const workerProxyUrl = `${DEFAULT_STATIC_WORKER_URL}/api/proxy-audio?url=${encodeURIComponent(unwrappedUrl)}`;
       if (
         this.refAudioEl &&
         unwrappedUrl &&
-        unwrappedUrl !== this.currentRefTrackUrl &&
-        !this.refAudioEl.src.includes('cdn1.suno.ai') &&
-        !unwrappedUrl.includes('somafm.com')
+        !this.currentRefTrackUrl.startsWith(DEFAULT_STATIC_WORKER_URL) &&
+        !unwrappedUrl.includes('somafm.com') &&
+        !unwrappedUrl.includes('assets/aistudio/')
       ) {
-        this.currentRefTrackUrl = unwrappedUrl;
-        this.refAudioEl.src = unwrappedUrl;
+        this.currentRefTrackUrl = workerProxyUrl;
+        this.refAudioEl.src = workerProxyUrl;
         this.refAudioEl.load();
         if (this.isRunning) {
           void this.refAudioEl.play().catch(() => {});
@@ -1814,7 +1888,7 @@ export class ProceduralAudioEngine {
         return;
       }
 
-      // Step 2: If direct CORS playback also failed, fall back to corsFallbackAudioEl
+      // Step 2: If CORS proxy playback also failed, fall back to corsFallbackAudioEl (no crossOrigin attribute)
       if (
         this.params.audioSource === 'customUrl' &&
         this.currentRefTrackUrl &&
@@ -1834,7 +1908,10 @@ export class ProceduralAudioEngine {
             })
             .catch((err: unknown) => {
               const errName = (err as { name?: string })?.name || '';
-              if (errName === 'AbortError') return;
+              if (errName === 'AbortError' || errName === 'NotAllowedError') {
+                // Superseded by load() or awaiting next user interaction; canplay/interaction listener will resume
+                return;
+              }
               this.telemetry.trackStatus = 'error';
               this.telemetry.trackErrorMessage =
                 'Could not load audio from this link. Ensure it is a direct audio URL (.mp3, .wav, .ogg, .m4a), Suno link, or live stream.';

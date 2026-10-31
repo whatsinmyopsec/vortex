@@ -23,6 +23,14 @@ const KNOWN_SUNO_SHORTLINKS = {
     uuid: '8492f898-13a7-4c67-a33d-684790e3aef3',
     title: 'Bro what the ohio rizzler mew gyatt fanu · Suno',
   },
+  '6ITmtiP9NU83f2Kj': {
+    uuid: '7f05f29e-bf18-4c7f-9ed9-0094afa656b6',
+    title: '(melodic female, echoing) · Suno',
+  },
+  FX8XlSwbFVdWUJ76: {
+    uuid: 'a0e5e8f7-2b1e-41f3-9268-62286968d42c',
+    title: 'I decide · Suno',
+  },
 };
 
 const UUID_REGEX =
@@ -79,14 +87,17 @@ async function resolveSongTarget(rawUrl) {
     };
   }
 
-  // 2. Direct Suno UUID in URL (e.g. suno.com/song/<uuid>)
+  // 2. Any Suno link: try Microlink first (avoids Cloudflare Worker-to-Suno Bot Fight Mode challenges)
   if (/(?:suno\.com|suno\.ai)\//i.test(trimmed)) {
     const directUuid = trimmed.match(UUID_REGEX);
+    const microlink = await resolveViaMicrolink(trimmed);
+    if (microlink) {
+      return microlink;
+    }
     if (directUuid) {
-      const microlink = await resolveViaMicrolink(trimmed);
       return {
         streamUrl: `https://cdn1.suno.ai/${directUuid[0].toLowerCase()}.mp4`,
-        title: microlink?.title || `Suno Track (${directUuid[0].slice(0, 8)})`,
+        title: `Suno Track (${directUuid[0].slice(0, 8)})`,
       };
     }
   }

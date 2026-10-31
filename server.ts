@@ -62,56 +62,90 @@ function extractSunoClipUuid(input: string): string | null {
 }
 
 /**
- * Losslessly remuxes Suno's decrypted m4a-opus stream into a standard Ogg Opus
- * container (`audio/ogg`) in ~120ms so HTMLAudioElement and Web Audio decodeAudioData
- * play it across all browsers without needing a custom WASM demuxer.
+ * Losslessly strips video and moves the MP4 moov atom to byte 0 (-movflags +faststart)
+ * producing a pure AAC-LC audio/mp4 container in ~150ms that decodes natively in all
+ * browsers (Chrome, Safari, Firefox, Edge, iOS, Android).
  */
-function remuxToStandardOggOpus(inputBuf: Buffer): Promise<{
+async function remuxToFaststartM4a(inputBuf: Buffer): Promise<{
   buffer: Buffer;
   contentType: string;
 }> {
-  return new Promise((resolve) => {
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const inPath = path.join(os.tmpdir(), `suno-in-${id}.bin`);
+  const outPath = path.join(os.tmpdir(), `suno-out-${id}.m4a`);
+
+  const cleanup = () => {
     try {
-      const ff = spawn('ffmpeg', [
+      if (fs.existsSync(inPath)) fs.unlinkSync(inPath);
+    } catch {}
+    try {
+      if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
+    } catch {}
+  };
+
+  const runFfmpeg = (args: string[]): Promise<void> =>
+    new Promise((resolve, reject) => {
+      const ff = spawn('ffmpeg', args);
+      ff.on('error', reject);
+      ff.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`ffmpeg exited with code ${code}`));
+      });
+    });
+
+  try {
+    await fs.promises.writeFile(inPath, inputBuf);
+    try {
+      // Fast path (~150ms): lossless copy of AAC audio stream without video track + faststart moov header
+      await runFfmpeg([
+        '-y',
         '-hide_banner',
         '-loglevel',
         'error',
         '-i',
-        'pipe:0',
+        inPath,
         '-vn',
         '-c:a',
         'copy',
-        '-f',
-        'ogg',
-        'pipe:1',
+        '-movflags',
+        '+faststart',
+        outPath,
       ]);
-      const chunks: Buffer[] = [];
-      ff.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
-      ff.on('error', () => {
-        resolve({ buffer: inputBuf, contentType: 'audio/mp4' });
-      });
-      ff.on('close', (code) => {
-        if (code === 0 && chunks.length > 0) {
-          resolve({
-            buffer: Buffer.concat(chunks),
-            contentType: 'audio/ogg',
-          });
-        } else {
-          resolve({ buffer: inputBuf, contentType: 'audio/mp4' });
-        }
-      });
-      ff.stdin.on('error', () => {});
-      ff.stdin.end(inputBuf);
     } catch {
-      resolve({ buffer: inputBuf, contentType: 'audio/mp4' });
+      // Fallback if source codec is Opus: transcode to universal AAC-LC faststart M4A
+      await runFfmpeg([
+        '-y',
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-i',
+        inPath,
+        '-vn',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '192k',
+        '-movflags',
+        '+faststart',
+        outPath,
+      ]);
     }
-  });
+    const outBuf = await fs.promises.readFile(outPath);
+    if (outBuf.length > 0) {
+      return { buffer: outBuf, contentType: 'audio/mp4' };
+    }
+  } catch {
+    // Fallback to raw buffer if ffmpeg is unavailable
+  } finally {
+    cleanup();
+  }
+  return { buffer: inputBuf, contentType: 'audio/mp4' };
 }
 
 /**
- * Fetches and decrypts a Suno clip's AES-CTR encrypted .m4a stream using Suno's
- * anonymous playback rights endpoint (/api/mango/rights), with automatic fallback
- * to Suno's unencrypted .mp4 stream if needed.
+ * Fetches a Suno clip's audio stream and remuxes it into a faststart AAC audio/mp4
+ * container so HTMLAudioElement and Web Audio AnalyserNode play it immediately
+ * across Chrome, Safari, Firefox, and Edge.
  */
 async function getDecryptedSunoAudioBuffer(
   clipId: string,
@@ -129,159 +163,160 @@ async function getDecryptedSunoAudioBuffer(
   }
 
   const task = (async (): Promise<CachedSunoAudio> => {
-    const m4aUrl =
-      encryptedUrl ||
-      `https://d2lwuy8qc234o3.cloudfront.net/1/clip/${normalizedId}.m4a`;
-
+    // Primary path: fetch unencrypted Suno CDN MP4 (contains 48kHz stereo 192kbps AAC-LC track)
+    // and strip video + move moov atom to byte 0 (+faststart) in ~150ms
     try {
-      const [rightsRes, mediaRes] = await Promise.all([
-        fetch('https://studio-api.prod.suno.com/api/mango/rights', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Origin: 'https://suno.com',
-            Referer: 'https://suno.com/',
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          },
-          body: JSON.stringify({
-            content_params: { content_id: normalizedId, content_type: 'clip' },
-          }),
-        }),
-        fetch(m4aUrl, {
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          },
-        }),
-      ]);
-
-      if (rightsRes.ok && mediaRes.ok) {
-        const rightsData = (await rightsRes.json()) as {
-          key?: string;
-          iv?: string;
-          glt?: string;
+      const mp4Url = `https://cdn1.suno.ai/${normalizedId}.mp4`;
+      const mp4Res = await fetch(mp4Url, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+        },
+      });
+      if (mp4Res.ok) {
+        const rawMp4Buf = Buffer.from(await mp4Res.arrayBuffer());
+        const remuxed = await remuxToFaststartM4a(rawMp4Buf);
+        const entry: CachedSunoAudio = {
+          buffer: remuxed.buffer,
+          contentType: remuxed.contentType,
+          timestamp: Date.now(),
         };
-        const encArrayBuf = await mediaRes.arrayBuffer();
-        const encBytes = new Uint8Array(encArrayBuf);
-
-        // Check if already unencrypted ISO BMFF ('ftyp' at bytes 4..7)
-        if (
-          encBytes.length >= 8 &&
-          encBytes[4] === 0x66 &&
-          encBytes[5] === 0x74 &&
-          encBytes[6] === 0x79 &&
-          encBytes[7] === 0x70
-        ) {
-          const remuxed = await remuxToStandardOggOpus(
-            Buffer.from(encArrayBuf)
-          );
-          const entry: CachedSunoAudio = {
-            buffer: remuxed.buffer,
-            contentType: remuxed.contentType,
-            timestamp: Date.now(),
-          };
-          sunoAudioCache.set(normalizedId, entry);
-          return entry;
+        if (sunoAudioCache.size >= MAX_SUNO_CACHE_ENTRIES) {
+          const oldestKey = sunoAudioCache.keys().next().value;
+          if (oldestKey) sunoAudioCache.delete(oldestKey);
         }
-
-        if (rightsData.key && rightsData.iv && rightsData.glt) {
-          const gltBytes = new TextEncoder().encode(rightsData.glt);
-          const gltHash = await crypto.subtle.digest('SHA-256', gltBytes);
-          const kek = await crypto.subtle.importKey(
-            'raw',
-            gltHash,
-            { name: 'AES-GCM' },
-            false,
-            ['decrypt']
-          );
-
-          const wrappedKey = Buffer.from(rightsData.key, 'base64');
-          const wrappedIv = Buffer.from(rightsData.iv, 'base64');
-          const aad = new TextEncoder().encode(normalizedId);
-
-          const rawKey = new Uint8Array(
-            await crypto.subtle.decrypt(
-              {
-                name: 'AES-GCM',
-                iv: wrappedKey.slice(0, 12),
-                additionalData: aad,
-              },
-              kek,
-              wrappedKey.slice(12)
-            )
-          );
-          const rawIv = new Uint8Array(
-            await crypto.subtle.decrypt(
-              {
-                name: 'AES-GCM',
-                iv: wrappedIv.slice(0, 12),
-                additionalData: aad,
-              },
-              kek,
-              wrappedIv.slice(12)
-            )
-          );
-
-          const ctrKey = await crypto.subtle.importKey(
-            'raw',
-            rawKey,
-            { name: 'AES-CTR' },
-            false,
-            ['decrypt']
-          );
-
-          const decryptedBuf = await crypto.subtle.decrypt(
-            { name: 'AES-CTR', counter: rawIv, length: 128 },
-            ctrKey,
-            encBytes
-          );
-
-          const remuxed = await remuxToStandardOggOpus(
-            Buffer.from(decryptedBuf)
-          );
-
-          const entry: CachedSunoAudio = {
-            buffer: remuxed.buffer,
-            contentType: remuxed.contentType,
-            timestamp: Date.now(),
-          };
-
-          if (sunoAudioCache.size >= MAX_SUNO_CACHE_ENTRIES) {
-            const oldestKey = sunoAudioCache.keys().next().value;
-            if (oldestKey) sunoAudioCache.delete(oldestKey);
-          }
-          sunoAudioCache.set(normalizedId, entry);
-          return entry;
-        }
+        sunoAudioCache.set(normalizedId, entry);
+        return entry;
       }
     } catch {
-      // Fall through to unencrypted MP4 fallback below
+      // Fall through to encrypted m4a decryption below
     }
 
-    // Fallback: fetch unencrypted Suno MP4 stream (contains standard AAC mp4a audio track)
-    const mp4FallbackUrl = `https://cdn1.suno.ai/${normalizedId}.mp4`;
-    const mp4Res = await fetch(mp4FallbackUrl, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      },
-    });
-    if (!mp4Res.ok) {
-      throw new Error(`Suno upstream returned ${mp4Res.status}`);
+    const m4aUrl =
+      encryptedUrl && encryptedUrl.endsWith('.m4a')
+        ? encryptedUrl
+        : `https://d2lwuy8qc234o3.cloudfront.net/1/clip/${normalizedId}.m4a`;
+
+    const [rightsRes, mediaRes] = await Promise.all([
+      fetch('https://studio-api.prod.suno.com/api/mango/rights', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: 'https://suno.com',
+          Referer: 'https://suno.com/',
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+        },
+        body: JSON.stringify({
+          content_params: { content_id: normalizedId, content_type: 'clip' },
+        }),
+      }),
+      fetch(m4aUrl, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+        },
+      }),
+    ]);
+
+    if (!rightsRes.ok || !mediaRes.ok) {
+      throw new Error(`Suno upstream returned ${mediaRes.status}`);
     }
-    const mp4Buf = Buffer.from(await mp4Res.arrayBuffer());
-    const entry: CachedSunoAudio = {
-      buffer: mp4Buf,
-      contentType: 'audio/mp4',
-      timestamp: Date.now(),
+
+    const rightsData = (await rightsRes.json()) as {
+      key?: string;
+      iv?: string;
+      glt?: string;
     };
-    if (sunoAudioCache.size >= MAX_SUNO_CACHE_ENTRIES) {
-      const oldestKey = sunoAudioCache.keys().next().value;
-      if (oldestKey) sunoAudioCache.delete(oldestKey);
+    const encArrayBuf = await mediaRes.arrayBuffer();
+    const encBytes = new Uint8Array(encArrayBuf);
+
+    if (
+      encBytes.length >= 8 &&
+      encBytes[4] === 0x66 &&
+      encBytes[5] === 0x74 &&
+      encBytes[6] === 0x79 &&
+      encBytes[7] === 0x70
+    ) {
+      const remuxed = await remuxToFaststartM4a(Buffer.from(encArrayBuf));
+      const entry: CachedSunoAudio = {
+        buffer: remuxed.buffer,
+        contentType: remuxed.contentType,
+        timestamp: Date.now(),
+      };
+      sunoAudioCache.set(normalizedId, entry);
+      return entry;
     }
-    sunoAudioCache.set(normalizedId, entry);
-    return entry;
+
+    if (rightsData.key && rightsData.iv && rightsData.glt) {
+      const gltBytes = new TextEncoder().encode(rightsData.glt);
+      const gltHash = await crypto.subtle.digest('SHA-256', gltBytes);
+      const kek = await crypto.subtle.importKey(
+        'raw',
+        gltHash,
+        { name: 'AES-GCM' },
+        false,
+        ['decrypt']
+      );
+
+      const wrappedKey = Buffer.from(rightsData.key, 'base64');
+      const wrappedIv = Buffer.from(rightsData.iv, 'base64');
+      const aad = new TextEncoder().encode(normalizedId);
+
+      const rawKey = new Uint8Array(
+        await crypto.subtle.decrypt(
+          {
+            name: 'AES-GCM',
+            iv: wrappedKey.slice(0, 12),
+            additionalData: aad,
+          },
+          kek,
+          wrappedKey.slice(12)
+        )
+      );
+      const rawIv = new Uint8Array(
+        await crypto.subtle.decrypt(
+          {
+            name: 'AES-GCM',
+            iv: wrappedIv.slice(0, 12),
+            additionalData: aad,
+          },
+          kek,
+          wrappedIv.slice(12)
+        )
+      );
+
+      const ctrKey = await crypto.subtle.importKey(
+        'raw',
+        rawKey,
+        { name: 'AES-CTR' },
+        false,
+        ['decrypt']
+      );
+
+      const decryptedBuf = await crypto.subtle.decrypt(
+        { name: 'AES-CTR', counter: rawIv, length: 128 },
+        ctrKey,
+        encBytes
+      );
+
+      const remuxed = await remuxToFaststartM4a(Buffer.from(decryptedBuf));
+
+      const entry: CachedSunoAudio = {
+        buffer: remuxed.buffer,
+        contentType: remuxed.contentType,
+        timestamp: Date.now(),
+      };
+
+      if (sunoAudioCache.size >= MAX_SUNO_CACHE_ENTRIES) {
+        const oldestKey = sunoAudioCache.keys().next().value;
+        if (oldestKey) sunoAudioCache.delete(oldestKey);
+      }
+      sunoAudioCache.set(normalizedId, entry);
+      return entry;
+    }
+
+    throw new Error('Unable to decode Suno audio stream');
   })();
 
   sunoInflightRequests.set(normalizedId, task);
@@ -319,7 +354,7 @@ async function resolveExternalSongUrl(rawInput: string): Promise<{
         redirect: 'follow',
         headers: {
           'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
       });
@@ -328,14 +363,19 @@ async function resolveExternalSongUrl(rawInput: string): Promise<{
       const contentType = response.headers.get('content-type') || '';
 
       // If the URL itself is already a direct audio stream
-      if (contentType.startsWith('audio/') || /\.(mp3|m4a|wav|ogg)(\?|$)/i.test(finalUrl)) {
+      if (contentType.startsWith('audio/') || /\.(mp3|m4a|mp4|wav|ogg)(\?|$)/i.test(finalUrl)) {
         const directUuid = extractSunoClipUuid(finalUrl);
         if (directUuid) {
-          void getDecryptedSunoAudioBuffer(directUuid, finalUrl).catch(() => {});
+          await Promise.race([
+            getDecryptedSunoAudioBuffer(directUuid, finalUrl).catch(() => {}),
+            new Promise<void>((r) => setTimeout(r, 1500)),
+          ]);
         }
         return {
           ok: true,
-          streamUrl: finalUrl,
+          streamUrl: directUuid
+            ? `https://cdn1.suno.ai/${directUuid}.mp4`
+            : finalUrl,
           title: 'Suno AI Track',
         };
       }
@@ -360,12 +400,11 @@ async function resolveExternalSongUrl(rawInput: string): Promise<{
 
       // Extract real audio URL from Suno page HTML (excluding sil-100.mp3 silent placeholder)
       const audioMatches =
-        html.match(/https:\/\/[^"'\s\\]+\.(?:m4a|mp3)/gi) || [];
+        html.match(/https:\/\/[^"'\s\\]+\.(?:m4a|mp3|mp4)/gi) || [];
       const validAudioUrls = audioMatches.filter(
         (u) => !u.includes('sil-100.mp3') && !u.includes('silence')
       );
 
-      // Prefer CloudFront .m4a clip URL or cdn1/cdn2.suno.ai URL found in the page
       const cloudfrontM4a = validAudioUrls.find(
         (u) => u.includes('cloudfront.net') && u.endsWith('.m4a')
       );
@@ -376,14 +415,17 @@ async function resolveExternalSongUrl(rawInput: string): Promise<{
         extractSunoClipUuid(html);
 
       if (uuid) {
-        const clipStreamUrl =
-          cloudfrontM4a ||
-          `https://d2lwuy8qc234o3.cloudfront.net/1/clip/${uuid}.m4a`;
-        // Kick off decryption + Ogg remuxing in background so resolve-song returns immediately
-        void getDecryptedSunoAudioBuffer(uuid, clipStreamUrl).catch(() => {});
+        const mp4StreamUrl = `https://cdn1.suno.ai/${uuid}.mp4`;
+        // Pre-warm the faststart AAC audio buffer so /api/proxy-audio responds immediately
+        await Promise.race([
+          getDecryptedSunoAudioBuffer(uuid, cloudfrontM4a || mp4StreamUrl).catch(
+            () => {}
+          ),
+          new Promise<void>((r) => setTimeout(r, 1500)),
+        ]);
         return {
           ok: true,
-          streamUrl: clipStreamUrl,
+          streamUrl: mp4StreamUrl,
           title: `${title} · Suno`,
         };
       }

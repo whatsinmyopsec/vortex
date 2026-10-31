@@ -31,6 +31,7 @@ import {
   DRUM_PATTERNS,
   DrumPatternId,
   estimateSeedBpmFromTrack,
+  extractCleanSongUrl,
   PRESET_SONG_LINKS,
   ProceduralAudioEngine,
   resolveSongUrl,
@@ -267,7 +268,7 @@ export const AudioSynthPanel: React.FC<AudioSynthPanelProps> = ({
     // Synchronously unlock Web Audio Context during the user's click event before any async fetch
     engine?.unlockOnUserGesture();
 
-    let targetInput = (rawLink ?? songUrlInput).trim();
+    let targetInput = extractCleanSongUrl(rawLink ?? songUrlInput);
     if (!targetInput) {
       setUrlError(
         'Paste a Suno link (suno.com/s/... or suno.com/song/...), direct audio link (.mp3, .wav, .ogg, .m4a), Dropbox/GitHub link, or stream URL.'
@@ -297,9 +298,7 @@ export const AudioSynthPanel: React.FC<AudioSynthPanelProps> = ({
     }
 
     setUrlError(null);
-    if (rawLink !== undefined) {
-      setSongUrlInput(rawLink);
-    }
+    setSongUrlInput(targetInput);
 
     setIsResolvingUrl(true);
     try {
@@ -665,6 +664,19 @@ export const AudioSynthPanel: React.FC<AudioSynthPanelProps> = ({
                   <input
                     type="text"
                     value={songUrlInput}
+                    onFocus={(e) => {
+                      e.currentTarget.select();
+                    }}
+                    onPaste={(e) => {
+                      const pasted = e.clipboardData?.getData('text') || '';
+                      const cleaned = extractCleanSongUrl(pasted);
+                      if (cleaned && /^(?:https?:\/\/|suno\.com\/|suno\.ai\/|somafm\.com\/)/i.test(cleaned)) {
+                        e.preventDefault();
+                        setSongUrlInput(cleaned);
+                        if (urlError) setUrlError(null);
+                        void handleLoadSongLink(cleaned);
+                      }
+                    }}
                     onChange={(e) => {
                       setSongUrlInput(e.target.value);
                       if (urlError) setUrlError(null);
